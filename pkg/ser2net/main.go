@@ -128,7 +128,9 @@ func (w *SerialWorker) Worker() {
 		go w.rxWorker()
 
 		_, err := os.Stat(w.path)
-		for err == nil {
+		
+		// Windows after open serial port block access to it
+		for err == nil || runtime.GOOS == "windows" && strings.HasSuffix(err.Error(), "Access is denied.") {
 			time.Sleep(time.Second)
 			_, err = os.Stat(w.path)
 		}
