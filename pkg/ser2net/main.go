@@ -129,8 +129,9 @@ func (w *SerialWorker) Worker() {
 
 		_, err := os.Stat(w.path)
 		
-		// Windows after open serial port block access to it
-		for err == nil || runtime.GOOS == "windows" && strings.HasSuffix(err.Error(), "Access is denied.") {
+		// Windwows after open serial port block access to it.
+		// Do not w.serialConn.Close if err == nil || runtime.GOOS == "windows" && strings.HasSuffix(err.Error(), "Access is denied.")
+		for err == nil || isWindowsRetryable(err) {
 			time.Sleep(time.Second)
 			_, err = os.Stat(w.path)
 		}
@@ -417,4 +418,21 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 	w.context = context
 
 	return &w, nil
+}
+
+// from testing
+// isWindowsRetryable reports whether err is a Windows error code
+// that may be fixed by retrying a failed filesystem operation.
+func isWindowsRetryable(err error) bool {
+	if runtime.GOOS != "windows" {
+		return true
+	}
+	for {
+		unwrapped := errors.Unwrap(err)
+		if unwrapped == nil {
+			break
+		}
+		err = unwrapped
+	}
+	return err == syscall.ERROR_ACCESS_DENIED
 }
