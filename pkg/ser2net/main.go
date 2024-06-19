@@ -142,7 +142,6 @@ func (w *SerialWorker) Worker() {
 		go w.rxWorker()
 
 		_, err := os.Stat(w.path)
-<<<<<<< HEAD
 
 		// Windows after open serial port block access to it
 		// do not w.serialConn.Close if err == nil || runtime.GOOS == "windows" && strings.HasSuffix(err.Error(), "Access is denied.")
@@ -162,13 +161,6 @@ func (w *SerialWorker) Worker() {
 				time.Sleep(time.Second)
 				_, err = os.Stat(w.path)
 			}
-=======
-		
-		// Windows after open serial port block access to it
-		for err == nil || runtime.GOOS == "windows" && strings.HasSuffix(err.Error(), "Access is denied.") {
-			time.Sleep(time.Second)
-			_, err = os.Stat(w.path)
->>>>>>> ce7638f63383c2ddcec756928744ce14da177d9a
 		}
 		serialClose(w.serialConn)
 	}
