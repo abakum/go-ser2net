@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -14,7 +15,7 @@ import (
 	"github.com/PatrickRudolph/telnet/options"
 	"github.com/sorenisanerd/gotty/server"
 	"github.com/sorenisanerd/gotty/utils"
-	"go.bug.st/serial.v1"
+	"go.bug.st/serial"
 )
 
 // SerialWorker instances one serial-network bridge
@@ -34,7 +35,16 @@ type SerialWorker struct {
 	txJobQueue chan byte
 	rxJobQueue []chan byte
 
-	context context.Context
+	context   context.Context
+	rfc2217   *telnet.Server
+	listenErr error
+}
+
+func serialClose(port serial.Port) error {
+	port.ResetInputBuffer()
+	port.ResetOutputBuffer()
+	port.Drain()
+	return port.Close()
 }
 
 func (w *SerialWorker) connectSerial() {
@@ -65,7 +75,7 @@ func (w *SerialWorker) txWorker() {
 					fmt.Printf("ERR: Writing failed %s\n", porterr.EncodedErrorString())
 					w.lastErr = porterr.EncodedErrorString()
 				}
-				w.serialConn.Close()
+				serialClose(w.serialConn)
 			}
 		} else if job == '\n' {
 			err := fmt.Sprintf("Error: %s\n", w.lastErr)
@@ -99,6 +109,10 @@ func (w *SerialWorker) rxWorker() {
 		}
 
 		if err != nil {
+			if !w.connected {
+				break
+			}
+
 			if err == syscall.EINTR {
 				continue
 			}
@@ -111,7 +125,7 @@ func (w *SerialWorker) rxWorker() {
 				fmt.Printf("ERR: Reading failed %s\n", porterr.EncodedErrorString())
 				w.lastErr = porterr.EncodedErrorString()
 			}
-			w.serialConn.Close()
+			serialClose(w.serialConn)
 			break
 		}
 	}
@@ -128,13 +142,35 @@ func (w *SerialWorker) Worker() {
 		go w.rxWorker()
 
 		_, err := os.Stat(w.path)
+<<<<<<< HEAD
+
+		// Windows after open serial port block access to it
+		// do not w.serialConn.Close if err == nil || runtime.GOOS == "windows" && strings.HasSuffix(err.Error(), "Access is denied.")
+		for err == nil || runtime.GOOS == "windows" && strings.HasSuffix(err.Error(), "Access is denied.") {
+			select {
+			case <-w.context.Done():
+				if w.rfc2217 != nil && w.listenErr == nil {
+					w.rfc2217.Stop()
+					w.rfc2217 = nil
+				}
+				if w.connected {
+					w.connected = false
+					serialClose(w.serialConn)
+				}
+				return
+			default:
+				time.Sleep(time.Second)
+				_, err = os.Stat(w.path)
+			}
+=======
 		
 		// Windows after open serial port block access to it
 		for err == nil || runtime.GOOS == "windows" && strings.HasSuffix(err.Error(), "Access is denied.") {
 			time.Sleep(time.Second)
 			_, err = os.Stat(w.path)
+>>>>>>> ce7638f63383c2ddcec756928744ce14da177d9a
 		}
-		w.serialConn.Close()
+		serialClose(w.serialConn)
 	}
 }
 
@@ -152,44 +188,54 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 
 	go func() {
 		var lastchar byte
+		defer wg.Done()
 
 		for b := range rx {
-			if b == '\n' && lastchar != '\r' {
+			select {
+			case <-context.Done():
+				return
+			default:
+				if b == '\n' && lastchar != '\r' {
 
-				_, err := wr.Write([]byte{'\r'})
-				if err != nil {
-					break
+					_, err := wr.Write([]byte{'\r'})
+					if err != nil {
+						return
+					}
 				}
+				_, err := wr.Write([]byte{b})
+				if err != nil {
+					return
+				}
+				lastchar = b
 			}
-			_, err := wr.Write([]byte{b})
-			if err != nil {
-				break
-			}
-			lastchar = b
 		}
-		wg.Done()
 	}()
 	go func() {
 		p := make([]byte, 16)
+		defer wg.Done()
 
 		for {
-			n, err := rr.Read(p)
-			for j := 0; j < n; j++ {
-				if p[j] == 0 {
-					continue
+			select {
+			case <-context.Done():
+				return
+			default:
+				n, err := rr.Read(p)
+				for j := 0; j < n; j++ {
+					if p[j] == 0 {
+						continue
+					}
+					// In binary mode there's no special CRLF handling
+					// Always transmit everything received
+					w.txJobQueue <- p[j]
 				}
-				// In binary mode there's no special CRLF handling
-				// Always transmit everything received
-				w.txJobQueue <- p[j]
-			}
-			if err != nil && strings.Contains(strings.ToLower(err.Error()), "i/o timeout") {
-				time.Sleep(time.Microsecond)
-				continue
-			} else if err != nil {
-				break
+				if err != nil && strings.Contains(strings.ToLower(err.Error()), "i/o timeout") {
+					time.Sleep(time.Microsecond)
+					continue
+				} else if err != nil {
+					return
+				}
 			}
 		}
-		wg.Done()
 	}()
 
 	wg.Wait()
@@ -209,7 +255,7 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 
 // ServeTELNET is the worker operating the telnet port - used by reiver/go-telnet
 func (w *SerialWorker) HandleTelnet(conn *telnet.Connection) {
-	w.serve(context.Background(), conn, conn)
+	w.serve(w.context, conn, conn)
 	conn.Close()
 }
 
@@ -347,6 +393,11 @@ func (w *SerialWorker) New(params map[string][]string) (s server.Slave, err erro
 
 // NewIoReadWriteCloser returns a ReadWriteCloser interface
 func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) {
+	time.Sleep(time.Millisecond * 3)
+	if !w.connected {
+		err = fmt.Errorf("not connected to %s. Last error:%s", w.path, w.lastErr)
+		return
+	}
 	rx := w.Open()
 	s = &SerialIOWorker{w: w,
 		rx: rx,
@@ -396,8 +447,9 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string) (e
 
 // StartTelnet starts a telnet server
 func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
-	svr := telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption)
-	return svr.ListenAndServe()
+	w.rfc2217 = telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption)
+	w.listenErr = w.rfc2217.ListenAndServe()
+	return w.listenErr
 }
 
 // NewSerialWorker creates a new SerialWorker and connect to path with 115200N8
