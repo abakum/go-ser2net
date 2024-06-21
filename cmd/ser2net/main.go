@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/abakum/go-ser2net/pkg/ser2net"
 )
@@ -20,9 +21,9 @@ func main() {
 	devPath := `COM3`
 	configPath := ""
 	bindHostname := ""
-	telnet := false
+	telnet := true
 	gotty := false
-	stdin := true
+	stdin := false
 	baud := 9600
 
 	flag.StringVar(&bindHostname, "bind", bindHostname, "Hostname or IP to bind telnet to")
@@ -140,11 +141,23 @@ func main() {
 
 	} else {
 		w, _ := ser2net.NewSerialWorker(ctx, devPath, baud)
+		go func() {
+			for i := 0; i < 10; i++ {
+				fmt.Println(i, w)
+				time.Sleep(time.Second)
+			}
+			cancel()
+			for i := 0; i < 10; i++ {
+				fmt.Println(i, w)
+				time.Sleep(time.Second)
+			}
+		}()
 		go w.Worker()
 
 		if useTelnet != nil && *useTelnet {
 			fmt.Printf("telnet on port %d baud %d, device %s\n", port, baud, devPath)
 			err := w.StartTelnet(bindHostname, port)
+			time.Sleep(time.Second * 5)
 			if nil != err {
 				panic(err)
 			}
@@ -166,7 +179,6 @@ func main() {
 			// Copy serial out to stdout
 			go func() {
 				io.Copy(os.Stdout, i)
-				i.Close()
 				// p := make([]byte, 1)
 				// for {
 				// 	n, err := i.Read(p)
