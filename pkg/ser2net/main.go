@@ -50,6 +50,33 @@ func SerialClose(port serial.Port) error {
 	return port.Close()
 }
 
+type Mode struct {
+	serial.Mode
+}
+
+func (m Mode) String() string {
+	p := "N"
+	switch m.Parity {
+	case serial.OddParity:
+		p = "O"
+	case serial.EvenParity:
+		p = "E"
+	case serial.MarkParity:
+		p = "M"
+	case serial.SpaceParity:
+		p = "S"
+	}
+	s := "1"
+	switch m.StopBits {
+	case serial.OnePointFiveStopBits:
+		s = "1.5"
+	case serial.TwoStopBits:
+		s = "2"
+	}
+	return fmt.Sprintf("%d,%d,%s,%s",
+		m.BaudRate, m.DataBits, p, s)
+}
+
 func (w *SerialWorker) String() string {
 	connected := "connected"
 	if !w.connected {
@@ -58,8 +85,8 @@ func (w *SerialWorker) String() string {
 	if w.rfc2217 != nil {
 		connected += " to " + w.rfc2217.Address
 	}
-	return fmt.Sprintf("%s@%d %s",
-		w.path, w.mode.BaudRate, connected)
+	return fmt.Sprintf("%s@%s %s",
+		w.path, Mode{w.mode}, connected)
 }
 
 func (w *SerialWorker) Stop() {
@@ -75,13 +102,13 @@ func (w *SerialWorker) SetMode(mode *serial.Mode) error {
 	return w.serialConn.SetMode(mode)
 }
 
+func (w *SerialWorker) Mode() serial.Mode {
+	return w.mode
+}
+
 func (w *SerialWorker) SerialClose() error {
 	w.connected = false
 	return SerialClose(w.serialConn)
-}
-
-func (w *SerialWorker) Connected() bool {
-	return w.connected
 }
 
 func (w *SerialWorker) connectSerial() {
@@ -575,4 +602,31 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 	w.quitting = false
 
 	return &w, nil
+}
+
+// baudRate(strconv.Atoi("x"))
+func BaudRate(b int, err error) (baud int) {
+	if err != nil {
+		baud = 9600
+		return
+	}
+	switch b {
+	case 0:
+		baud = 115200
+	case 1:
+		baud = 19200
+	case 2:
+		baud = 2400
+	case 3:
+		baud = 38400
+	case 4:
+		baud = 4800
+	case 5:
+		baud = 57600
+	case 9:
+		baud = 9600
+	default:
+		baud = b
+	}
+	return
 }

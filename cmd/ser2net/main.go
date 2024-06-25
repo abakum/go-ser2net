@@ -21,9 +21,9 @@ func main() {
 	devPath := `COM3`
 	configPath := ""
 	bindHostname := ""
-	telnet := true
+	telnet := false
 	gotty := false
-	stdin := false
+	stdin := true
 	baud := 9600
 
 	flag.StringVar(&bindHostname, "bind", bindHostname, "Hostname or IP to bind telnet to")
@@ -141,17 +141,17 @@ func main() {
 
 	} else {
 		w, _ := ser2net.NewSerialWorker(ctx, devPath, baud)
-		go func() {
-			for i := 0; i < 10; i++ {
-				fmt.Println(i, w)
-				time.Sleep(time.Second)
-			}
-			cancel()
-			for i := 0; i < 10; i++ {
-				fmt.Println(i, w)
-				time.Sleep(time.Second)
-			}
-		}()
+		// go func() {
+		// 	for i := 0; i < 10; i++ {
+		// 		fmt.Println(i, w)
+		// 		time.Sleep(time.Second)
+		// 	}
+		// 	cancel()
+		// 	for i := 0; i < 10; i++ {
+		// 		fmt.Println(i, w)
+		// 		time.Sleep(time.Second)
+		// 	}
+		// }()
 		go w.Worker()
 
 		if useTelnet != nil && *useTelnet {
@@ -175,6 +175,11 @@ func main() {
 			}
 			fmt.Printf("stdin/stdout baud %d, device %s\n", baud, devPath)
 			defer i.Close()
+			restore, err := ser2net.SetupVirtualTerminal()
+			if err != nil {
+				panic(err)
+			}
+			defer restore()
 
 			// Copy serial out to stdout
 			go func() {
@@ -187,6 +192,7 @@ func main() {
 				// 	}
 				// 	fmt.Printf("%s", string(p[:n]))
 				// }
+
 			}()
 
 			// Copy stdin to serial
@@ -198,7 +204,7 @@ func main() {
 			// 	if err != nil {
 			// 		break
 			// 	}
-
+			// 	fmt.Fprintf(os.Stderr, "%v", p)
 			// 	_, err = i.Write(p)
 			// 	if err != nil {
 			// 		break
