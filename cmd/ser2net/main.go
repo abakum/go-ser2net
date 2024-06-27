@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/abakum/go-ser2net/pkg/ser2net"
+
+	"github.com/containerd/console"
 )
 
 func main() {
@@ -168,6 +170,7 @@ func main() {
 				panic(err)
 			}
 		} else if useStdin != nil && *useStdin {
+
 			// Get a ReadWriteCloser interface
 			i, err := w.NewIoReadWriteCloser()
 			if nil != err {
@@ -175,12 +178,14 @@ func main() {
 			}
 			fmt.Printf("stdin/stdout baud %d, device %s\n", baud, devPath)
 			defer i.Close()
-			restore, err := ser2net.SetupVirtualTerminal()
-			if err != nil {
-				panic(err)
-			}
-			defer restore()
-
+			// restore, err := ser2net.SetupVirtualTerminal()
+			// if err != nil {
+			// 	panic(err)
+			// }
+			// defer restore()
+			current := console.Current()
+			defer current.Reset()
+			current.SetRaw()
 			// Copy serial out to stdout
 			go func() {
 				io.Copy(os.Stdout, i)

@@ -18,6 +18,11 @@ import (
 	"go.bug.st/serial"
 )
 
+const (
+	K32 = 32 * 1024
+	K16 = 16 * 1024
+)
+
 // SerialWorker instances one serial-network bridge
 type SerialWorker struct {
 	// serial connection
@@ -186,7 +191,7 @@ func (w *SerialWorker) rxWorker() {
 	}
 	// fmt.Println("rxWorker...")
 
-	b := make([]byte, 16)
+	b := make([]byte, K16)
 	defer func() {
 		w.quitting = true
 		// fmt.Println("...rxWorker")
@@ -274,7 +279,7 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	rx := make(chan byte, 32*1024)
+	rx := make(chan byte, K32)
 
 	// Add RX fifo
 	w.mux.Lock()
@@ -316,7 +321,7 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 	}()
 	go func() {
 		// fmt.Println("serve Read...")
-		p := make([]byte, 16)
+		p := make([]byte, K16)
 		defer func() {
 			// w.quitting = true
 			wr.(*telnet.Connection).Close()
@@ -392,7 +397,7 @@ func (w *SerialWorker) Close(rx chan byte) {
 
 // Open adds a channel to the internal list
 func (w *SerialWorker) Open() (rx chan byte) {
-	rx = make(chan byte, 32*1024)
+	rx = make(chan byte, K32)
 
 	// Add RX fifo
 	w.mux.Lock()
