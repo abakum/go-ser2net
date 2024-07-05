@@ -23,9 +23,9 @@ func main() {
 	devPath := `COM3`
 	configPath := ""
 	bindHostname := ""
-	telnet := false
+	telnet := true
 	gotty := false
-	stdin := true
+	stdin := false
 	baud := 9600
 
 	flag.StringVar(&bindHostname, "bind", bindHostname, "Hostname or IP to bind telnet to")
@@ -143,17 +143,17 @@ func main() {
 
 	} else {
 		w, _ := ser2net.NewSerialWorker(ctx, devPath, baud)
-		// go func() {
-		// 	for i := 0; i < 10; i++ {
-		// 		fmt.Println(i, w)
-		// 		time.Sleep(time.Second)
-		// 	}
-		// 	cancel()
-		// 	for i := 0; i < 10; i++ {
-		// 		fmt.Println(i, w)
-		// 		time.Sleep(time.Second)
-		// 	}
-		// }()
+		go func() {
+			for i := 0; i < 10; i++ {
+				fmt.Println(i, w)
+				time.Sleep(time.Second)
+			}
+			cancel()
+			for i := 0; i < 10; i++ {
+				fmt.Println(i, w)
+				time.Sleep(time.Second)
+			}
+		}()
 		go w.Worker()
 
 		if useTelnet != nil && *useTelnet {

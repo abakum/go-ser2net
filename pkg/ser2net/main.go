@@ -155,6 +155,10 @@ func (w *SerialWorker) Mode() serial.Mode {
 	return w.mode
 }
 
+func (w *SerialWorker) Path() string {
+	return w.path
+}
+
 func (w *SerialWorker) SerialClose() error {
 	w.connected = false
 	return SerialClose(w.serialConn)
