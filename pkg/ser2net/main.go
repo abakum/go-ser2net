@@ -19,8 +19,10 @@ import (
 )
 
 const (
+	B16 = 16
+	K1  = 1024
+	K4  = 4 * 1024
 	K32 = 32 * 1024
-	K16 = 16 * 1024
 )
 
 // SerialWorker instances one serial-network bridge
@@ -57,6 +59,44 @@ func SerialClose(port serial.Port) error {
 
 type Mode struct {
 	serial.Mode
+	Name string
+}
+
+type SerialPort struct {
+	serial.Port
+	Mode
+}
+
+// Open opens the serial port using the specified modes
+func Open(portName string, mode *serial.Mode) (*SerialPort, error) {
+	port, err := serial.Open(portName, mode)
+	if err != nil {
+		// Return a nil interface, for which var==nil is true (instead of
+		// a nil pointer to a struct that satisfies the interface).
+		return nil, err
+	}
+	return &SerialPort{port, Mode{*mode, portName}}, err
+}
+
+// Некоторые устройства имеют короткий буфер и медленно из него читают.
+// Будем передавать по одному байту за раз.
+func (w *SerialPort) Write1(p []byte) (n int, err error) {
+	for i, b := range p {
+		_, err = w.Port.Write([]byte{b})
+		if err != nil {
+			return i, err
+		}
+	}
+	return len(p), nil
+}
+
+// Имя порта типа com3 или /dev/ttyUSB0
+func (w *SerialPort) String() string {
+	return w.Name
+}
+
+func (w *SerialPort) SerialClose() error {
+	return SerialClose(w.Port)
 }
 
 func (m Mode) String() string {
@@ -78,8 +118,12 @@ func (m Mode) String() string {
 	case serial.TwoStopBits:
 		s = "2"
 	}
-	return fmt.Sprintf("%d,%d,%s,%s",
-		m.BaudRate, m.DataBits, p, s)
+	name := ""
+	if m.Name != "" {
+		name += m.Name + "@"
+	}
+	return fmt.Sprintf("%s%d,%d,%s,%s",
+		name, m.BaudRate, m.DataBits, p, s)
 }
 
 func (w *SerialWorker) String() string {
@@ -90,8 +134,8 @@ func (w *SerialWorker) String() string {
 	if w.rfc2217 != nil {
 		connected += " to " + w.rfc2217.Address
 	}
-	return fmt.Sprintf("%s@%s %s",
-		w.path, Mode{w.mode}, connected)
+	return fmt.Sprintf("%s %s",
+		Mode{w.mode, w.path}, connected)
 }
 
 func (w *SerialWorker) Stop() {
@@ -114,6 +158,16 @@ func (w *SerialWorker) Mode() serial.Mode {
 func (w *SerialWorker) SerialClose() error {
 	w.connected = false
 	return SerialClose(w.serialConn)
+}
+
+// Когда ждать connectSerial не хорошо
+func (w *SerialWorker) SetSerial(con serial.Port) {
+	w.connected = false
+	if w.quitting {
+		return
+	}
+	w.serialConn = con
+	w.connected = true
 }
 
 func (w *SerialWorker) connectSerial() {
@@ -191,7 +245,7 @@ func (w *SerialWorker) rxWorker() {
 	}
 	// fmt.Println("rxWorker...")
 
-	b := make([]byte, K16)
+	b := make([]byte, B16)
 	defer func() {
 		w.quitting = true
 		// fmt.Println("...rxWorker")
@@ -321,7 +375,7 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 	}()
 	go func() {
 		// fmt.Println("serve Read...")
-		p := make([]byte, K16)
+		p := make([]byte, K1)
 		defer func() {
 			// w.quitting = true
 			wr.(*telnet.Connection).Close()
@@ -589,10 +643,10 @@ func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
 	return
 }
 
-// NewSerialWorker creates a new SerialWorker and connect to path with 115200N8
+// NewSerialWorker creates a new SerialWorker and connect to path@115200,8,N,1
 func NewSerialWorker(context context.Context, path string, baud int) (*SerialWorker, error) {
 	var w SerialWorker
-	w.txJobQueue = make(chan byte, 4096)
+	w.txJobQueue = make(chan byte, K4)
 	if baud <= 0 {
 		baud = 115200
 	}
