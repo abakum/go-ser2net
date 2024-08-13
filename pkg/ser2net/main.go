@@ -486,6 +486,7 @@ func (g *SerialIOWorker) Read(buffer []byte) (n int, err error) {
 	b = <-g.rx
 
 	for {
+		// Заменяем `\r\n` на `\r`
 		if b == '\n' && g.lastRxchar != '\r' {
 			if n < len(buffer) {
 				buffer[n] = '\r'
@@ -519,16 +520,18 @@ func (g *SerialIOWorker) Write(buffer []byte) (n int, err error) {
 
 	for _, p := range buffer {
 
-		if g.lastTxchar == '\r' && p != '\n' {
-			g.w.txJobQueue <- g.lastTxchar
-			g.w.txJobQueue <- p
-		}
+		// if g.lastTxchar == '\r' && p != '\n' {
+		// 	g.w.txJobQueue <- g.lastTxchar
+		// 	g.w.txJobQueue <- p
+		// }
 		g.lastTxchar = p
 		if p == '\n' {
+			// Заменяем '\n' на '\r\n'
 			g.w.txJobQueue <- '\r'
 			n++
 			continue
 		} else if p == 0x7f {
+			// Заменяем Ctrl-H на '\b'
 			g.w.txJobQueue <- '\b'
 			n++
 			continue
@@ -561,7 +564,7 @@ func (g SerialIOWorker) WindowTitleVariables() (titles map[string]interface{}) {
 }
 
 // New returns a GoTTY slave
-func (w *SerialWorker) New(params map[string][]string) (s server.Slave, err error) {
+func (w *SerialWorker) New(params map[string][]string, _ map[string][]string) (s server.Slave, err error) {
 	rx := w.Open()
 	s = &SerialIOWorker{w: w,
 		rx: rx,
@@ -587,9 +590,10 @@ func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) 
 
 // StartGoTTY starts a GoTTY server
 func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string) (err error) {
-	htermOptions := &server.HtermPrefernces{}
+	// htermOptions := &server.HtermPrefernces{}
 	appOptions := &server.Options{
-		Preferences: htermOptions,
+
+		// Preferences: htermOptions,
 	}
 	if err = utils.ApplyDefaultValues(appOptions); err != nil {
 		return
@@ -600,7 +604,7 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string) (e
 	appOptions.Port = fmt.Sprintf("%d", port)
 	appOptions.EnableBasicAuth = len(basicauth) > 0
 	appOptions.Credential = basicauth
-	appOptions.Preferences.BackspaceSendsBackspace = true
+	// appOptions.Preferences.BackspaceSendsBackspace = true
 	hostname, _ := os.Hostname()
 
 	appOptions.TitleVariables = map[string]interface{}{
