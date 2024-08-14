@@ -8,12 +8,15 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/abakum/go-ser2net/pkg/ser2net"
+	"github.com/mattn/go-isatty"
+	"github.com/xlab/closer"
 
 	"github.com/containerd/console"
 )
@@ -24,9 +27,10 @@ func main() {
 	configPath := ""
 	bindHostname := ""
 	telnet := false
-	gotty := true
-	stdin := false
+	gotty := false
+	stdin := true
 	baud := 115200
+	once := false
 
 	flag.StringVar(&bindHostname, "bind", bindHostname, "Hostname or IP to bind telnet to")
 	flag.StringVar(&devPath, "dev", devPath, "TTY to open")
@@ -50,6 +54,8 @@ func main() {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer closer.Close()
+	closer.Bind(cancel)
 
 	if configPath != "" {
 		var wg sync.WaitGroup
@@ -178,43 +184,15 @@ func main() {
 			}
 			fmt.Printf("stdin/stdout baud %d, device %s\n", baud, devPath)
 			defer i.Close()
-			// restore, err := ser2net.SetupVirtualTerminal()
-			// if err != nil {
-			// 	panic(err)
-			// }
-			// defer restore()
-			current := console.Current()
-			defer current.Reset()
-			current.SetRaw()
+			setRaw(&once)
 			// Copy serial out to stdout
 			go func() {
 				io.Copy(os.Stdout, i)
-				// p := make([]byte, 1)
-				// for {
-				// 	n, err := i.Read(p)
-				// 	if err != nil {
-				// 		break
-				// 	}
-				// 	fmt.Printf("%s", string(p[:n]))
-				// }
 
 			}()
 
 			// Copy stdin to serial
 			io.Copy(i, os.Stdin)
-			// reader := bufio.NewReader(os.Stdin)
-			// p := make([]byte, 1)
-			// for {
-			// 	_, err := reader.Read(p)
-			// 	if err != nil {
-			// 		break
-			// 	}
-			// 	fmt.Fprintf(os.Stderr, "%v", p)
-			// 	_, err = i.Write(p)
-			// 	if err != nil {
-			// 		break
-			// 	}
-			// }
 
 		} else {
 			panic("Must specify one of [telnet, gotty]")
@@ -222,4 +200,60 @@ func main() {
 	}
 
 	cancel()
+}
+
+func setRaw(already *bool) {
+	if *already {
+		return
+	}
+	*already = true
+
+	var (
+		err      error
+		current  console.Console
+		settings string
+	)
+
+	current, err = console.ConsoleFromFile(os.Stdin)
+	if err == nil {
+		err = current.SetRaw()
+		if err == nil {
+			closer.Bind(func() { current.Reset() })
+			return
+		}
+	}
+
+	if isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+		settings, err = sttySettings()
+		if err == nil {
+			err = sttyMakeRaw()
+			if err == nil {
+				closer.Bind(func() { sttyReset(settings) })
+				return
+			}
+		}
+	}
+
+}
+
+func sttyMakeRaw() error {
+	cmd := exec.Command("stty", "raw", "-echo")
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+func sttySettings() (string, error) {
+	cmd := exec.Command("stty", "-g")
+	cmd.Stdin = os.Stdin
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func sttyReset(settings string) {
+	cmd := exec.Command("stty", settings)
+	cmd.Stdin = os.Stdin
+	_ = cmd.Run()
 }

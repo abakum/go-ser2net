@@ -517,30 +517,14 @@ func (g *SerialIOWorker) Read(buffer []byte) (n int, err error) {
 
 // Write implements gotty slave interface
 func (g *SerialIOWorker) Write(buffer []byte) (n int, err error) {
-
 	for _, p := range buffer {
-
-		// if g.lastTxchar == '\r' && p != '\n' {
-		// 	g.w.txJobQueue <- g.lastTxchar
-		// 	g.w.txJobQueue <- p
-		// }
-		g.lastTxchar = p
-		if p == '\n' {
-			// Заменяем '\n' на '\r\n'
-			g.w.txJobQueue <- '\r'
-			n++
-			continue
-		} else if p == 0x7f {
-			// Заменяем Ctrl-H на '\b'
-			g.w.txJobQueue <- '\b'
-			n++
-			continue
+		if p == 0x7f {
+			p = '\b'
 		}
 		g.w.txJobQueue <- p
-		n++
 	}
 
-	return
+	return len(buffer), nil // если изменить n то будет ошибка
 }
 
 // Close implements gotty slave interface
