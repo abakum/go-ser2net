@@ -1,6 +1,7 @@
 package ser2net
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -362,6 +363,9 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 				if !ok {
 					return
 				}
+				// \r\n -> \r\n
+				// x\n -> x\r\n
+				// com->telnet
 				if b == '\n' && lastchar != '\r' {
 
 					_, err := wr.Write([]byte{'\r'})
@@ -393,20 +397,17 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 				return
 			default:
 				n, err := rr.Read(p)
-				for j := 0; j < n; j++ {
-					if p[j] == 0 {
-						continue
-					}
-					// In binary mode there's no special CRLF handling
-					// Always transmit everything received
-					w.txJobQueue <- p[j]
-				}
 				if err != nil && strings.Contains(strings.ToLower(err.Error()), "i/o timeout") {
 					time.Sleep(time.Microsecond)
 					continue
 				} else if err != nil {
 					return
 				}
+				buf := bytes.ReplaceAll(p[:n], []byte("\r\n"), []byte("\r"))
+				for _, b := range buf {
+					w.txJobQueue <- b
+				}
+
 			}
 		}
 	}()
@@ -476,7 +477,7 @@ type SerialIOWorker struct {
 	w          *SerialWorker
 	rx         chan byte
 	lastRxchar byte
-	lastTxchar byte
+	// lastTxchar byte
 }
 
 // Read implements gotty slave interface
@@ -486,7 +487,7 @@ func (g *SerialIOWorker) Read(buffer []byte) (n int, err error) {
 	b = <-g.rx
 
 	for {
-		// Заменяем `\r\n` на `\r`
+		// Заменяем x\n на x\r\n
 		if b == '\n' && g.lastRxchar != '\r' {
 			if n < len(buffer) {
 				buffer[n] = '\r'
@@ -559,7 +560,7 @@ func (w *SerialWorker) New(params map[string][]string, _ map[string][]string) (s
 
 // NewIoReadWriteCloser returns a ReadWriteCloser interface
 func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) {
-	time.Sleep(time.Millisecond * 3)
+	time.Sleep(time.Millisecond * 77)
 	if !w.connected {
 		err = fmt.Errorf("not connected to %s. Last error:%s", w.path, w.lastErr)
 		return
