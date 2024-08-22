@@ -156,9 +156,9 @@ func (w *SerialWorker) Mode() serial.Mode {
 	return w.mode
 }
 
-func (w *SerialWorker) Path() string {
-	return w.path
-}
+// func (w *SerialWorker) Path() string {
+// 	return w.path
+// }
 
 func (w *SerialWorker) SerialClose() error {
 	w.connected = false
@@ -468,8 +468,8 @@ func (w *SerialWorker) Open() (rx chan byte) {
 
 // Name returns the instance name
 func (w *SerialWorker) Name() (name string) {
-	name = "go-ser2net"
-	return
+	// name = "go-ser2net"
+	return w.path
 }
 
 // SerialIOWorker used as GoTTY factory
@@ -488,6 +488,7 @@ func (g *SerialIOWorker) Read(buffer []byte) (n int, err error) {
 
 	for {
 		// Заменяем x\n на x\r\n
+		// Но \r\n передаём как \r\n
 		if b == '\n' && g.lastRxchar != '\r' {
 			if n < len(buffer) {
 				buffer[n] = '\r'
@@ -519,7 +520,7 @@ func (g *SerialIOWorker) Read(buffer []byte) (n int, err error) {
 // Write implements gotty slave interface
 func (g *SerialIOWorker) Write(buffer []byte) (n int, err error) {
 	for _, p := range buffer {
-		if p == 0x7f {
+		if p == 0x7f { // ^H или BackSpace
 			p = '\b'
 		}
 		g.w.txJobQueue <- p
@@ -543,7 +544,7 @@ func (g SerialIOWorker) ResizeTerminal(columns int, rows int) (err error) {
 // WindowTitleVariables implements gotty slave interface
 func (g SerialIOWorker) WindowTitleVariables() (titles map[string]interface{}) {
 	titles = map[string]interface{}{
-		"command": "go-ser2net",
+		"command": g.w.Name(),
 	}
 	return
 }
@@ -575,11 +576,7 @@ func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) 
 
 // StartGoTTY starts a GoTTY server
 func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string) (err error) {
-	// htermOptions := &server.HtermPrefernces{}
-	appOptions := &server.Options{
-
-		// Preferences: htermOptions,
-	}
+	appOptions := &server.Options{}
 	if err = utils.ApplyDefaultValues(appOptions); err != nil {
 		return
 	}
@@ -589,7 +586,6 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string) (e
 	appOptions.Port = fmt.Sprintf("%d", port)
 	appOptions.EnableBasicAuth = len(basicauth) > 0
 	appOptions.Credential = basicauth
-	// appOptions.Preferences.BackspaceSendsBackspace = true
 	hostname, _ := os.Hostname()
 
 	appOptions.TitleVariables = map[string]interface{}{

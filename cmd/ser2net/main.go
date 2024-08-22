@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/abakum/go-ser2net/pkg/ser2net"
 	"github.com/mattn/go-isatty"
@@ -165,7 +164,7 @@ func main() {
 		if useTelnet != nil && *useTelnet {
 			fmt.Printf("telnet on port %d baud %d, device %s\n", port, baud, devPath)
 			err := w.StartTelnet(bindHostname, port)
-			time.Sleep(time.Second * 5)
+			// time.Sleep(time.Second * 5)
 			if nil != err {
 				panic(err)
 			}
