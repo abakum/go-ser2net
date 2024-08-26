@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"os"
 	"runtime"
 	"strings"
@@ -44,7 +46,10 @@ type SerialWorker struct {
 	rxJobQueue []chan byte
 
 	context  context.Context
+	cancel   context.CancelFunc
 	rfc2217  *telnet.Server
+	web      *server.Server
+	url      string
 	quitting bool
 }
 
@@ -132,8 +137,8 @@ func (w *SerialWorker) String() string {
 	if !w.connected {
 		connected = "not " + connected
 	}
-	if w.rfc2217 != nil {
-		connected += " to " + w.rfc2217.Address
+	if w.url != "" {
+		connected += " to " + w.url
 	}
 	return fmt.Sprintf("%s %s",
 		Mode{w.mode, w.path}, connected)
@@ -141,10 +146,16 @@ func (w *SerialWorker) String() string {
 
 func (w *SerialWorker) Stop() {
 	w.quitting = true
+	w.url = ""
 	if w.rfc2217 != nil {
 		w.rfc2217.Stop()
 		w.rfc2217 = nil
 	}
+	w.cancel()
+	if w.web != nil {
+		w.web = nil
+	}
+	w.SerialClose()
 }
 
 func (w *SerialWorker) SetMode(mode *serial.Mode) error {
@@ -575,7 +586,11 @@ func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) 
 }
 
 // StartGoTTY starts a GoTTY server
-func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string) (err error) {
+func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string, quiet bool) (err error) {
+	if w.quitting {
+		return
+	}
+
 	appOptions := &server.Options{}
 	if err = utils.ApplyDefaultValues(appOptions); err != nil {
 		return
@@ -586,6 +601,13 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string) (e
 	appOptions.Port = fmt.Sprintf("%d", port)
 	appOptions.EnableBasicAuth = len(basicauth) > 0
 	appOptions.Credential = basicauth
+
+	appOptions.Quiet = quiet
+
+	if appOptions.Quiet {
+		log.SetOutput(io.Discard)
+	}
+
 	hostname, _ := os.Hostname()
 
 	appOptions.TitleVariables = map[string]interface{}{
@@ -604,8 +626,15 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string) (e
 		return
 	}
 
+	w.web = srv
+	ctx, cancel := context.WithCancel(w.context)
+	w.context = ctx
+	w.cancel = cancel
+	w.url = fmt.Sprintf("http://%s", net.JoinHostPort(appOptions.Address, appOptions.Port))
 	err = srv.Run(w.context)
+	w.Stop()
 	if err != nil {
+		w.lastErr = err.Error()
 		time.Sleep(time.Second)
 	}
 
@@ -620,12 +649,13 @@ func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
 	}
 	ctx, cancel := context.WithCancel(w.context)
 	w.context = ctx
+	w.cancel = cancel
 	w.rfc2217 = telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption)
+	w.url = "telnet://" + w.rfc2217.Address
 	err = w.rfc2217.ListenAndServe()
-	cancel()
+	w.Stop()
 	if err != nil {
 		w.lastErr = err.Error()
-		w.rfc2217 = nil
 		time.Sleep(time.Second)
 	}
 	// fmt.Println("...StartTelnet")

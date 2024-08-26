@@ -170,7 +170,7 @@ func main() {
 			}
 		} else if useGotty != nil && *useGotty {
 			fmt.Printf("gotty on port %d baud %d, device %s\n", port, baud, devPath)
-			err := w.StartGoTTY(bindHostname, port, "")
+			err := w.StartGoTTY(bindHostname, port, "", false)
 			if nil != err {
 				panic(err)
 			}
