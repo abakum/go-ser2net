@@ -144,18 +144,17 @@ func (w *SerialWorker) String() string {
 		Mode{w.mode, w.path}, connected)
 }
 
+// Останавливает сервер w.rfc2217.
+// Останавливает сервер w.web через w.cancel().
+// Останавливает последовательный порт w.cancel().
 func (w *SerialWorker) Stop() {
-	w.quitting = true
 	w.url = ""
+	if w.cancel != nil {
+		w.cancel()
+	}
 	if w.rfc2217 != nil {
 		w.rfc2217.Stop()
-		w.rfc2217 = nil
 	}
-	w.cancel()
-	if w.web != nil {
-		w.web = nil
-	}
-	w.SerialClose()
 }
 
 func (w *SerialWorker) SetMode(mode *serial.Mode) error {
@@ -633,9 +632,11 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string, qu
 	w.url = fmt.Sprintf("http://%s", net.JoinHostPort(appOptions.Address, appOptions.Port))
 	err = srv.Run(w.context)
 	w.Stop()
+	w.web = nil
+
 	if err != nil {
 		w.lastErr = err.Error()
-		time.Sleep(time.Second)
+		time.Sleep(time.Millisecond * 111)
 	}
 
 	return
@@ -653,10 +654,12 @@ func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
 	w.rfc2217 = telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption)
 	w.url = "telnet://" + w.rfc2217.Address
 	err = w.rfc2217.ListenAndServe()
+	w.rfc2217 = nil
 	w.Stop()
+
 	if err != nil {
 		w.lastErr = err.Error()
-		time.Sleep(time.Second)
+		time.Sleep(time.Millisecond * 111)
 	}
 	// fmt.Println("...StartTelnet")
 	return
