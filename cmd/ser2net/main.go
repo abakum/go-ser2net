@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -21,8 +20,10 @@ import (
 )
 
 func main() {
-	port := 22170
+	log.SetFlags(log.Llongfile)
+	port := 2323
 	devPath := `COM3`
+	// devPath := `cmd`
 	configPath := ""
 	bindHostname := ""
 	telnet := false
@@ -94,7 +95,7 @@ func main() {
 				if len(opts) > 0 {
 					baud, _ = strconv.Atoi(opts[0])
 				}
-				fmt.Printf("telnet on port %d baud %d, device %s\n", port, baud, devPath)
+				log.Printf("telnet on port %d baud %d, device %s\n", port, baud, devPath)
 				w, _ := ser2net.NewSerialWorker(ctx, devPath, baud)
 				go w.Worker()
 
@@ -126,13 +127,13 @@ func main() {
 				if len(opts) > 0 {
 					baud, _ = strconv.Atoi(opts[0])
 				}
-				fmt.Printf("gotty on port %d baud %d, device %s\n", port, baud, devPath)
+				log.Printf("gotty on port %d baud %d, device %s\n", port, baud, devPath)
 				w, _ := ser2net.NewSerialWorker(ctx, devPath, baud)
 				go w.Worker()
 
 				go func() {
 					defer wg.Done()
-					err := w.StartGoTTY(bindHostname, port, "")
+					err := w.StartGoTTY(bindHostname, port, "", true)
 					if nil != err {
 						panic(err)
 					}
@@ -150,26 +151,26 @@ func main() {
 		w, _ := ser2net.NewSerialWorker(ctx, devPath, baud)
 		// go func() {
 		// 	for i := 0; i < 10; i++ {
-		// 		fmt.Println(i, w)
+		// 		log.Println(i, w)
 		// 		time.Sleep(time.Second)
 		// 	}
 		// 	cancel()
 		// 	for i := 0; i < 10; i++ {
-		// 		fmt.Println(i, w)
+		// 		log.Println(i, w)
 		// 		time.Sleep(time.Second)
 		// 	}
 		// }()
 		go w.Worker()
 
 		if useTelnet != nil && *useTelnet {
-			fmt.Printf("telnet on port %d baud %d, device %s\n", port, baud, devPath)
+			log.Printf("telnet on port %d baud %d, device %s\n", port, baud, devPath)
 			err := w.StartTelnet(bindHostname, port)
 			// time.Sleep(time.Second * 5)
 			if nil != err {
 				panic(err)
 			}
 		} else if useGotty != nil && *useGotty {
-			fmt.Printf("gotty on port %d baud %d, device %s\n", port, baud, devPath)
+			log.Printf("gotty on port %d baud %d, device %s\n", port, baud, devPath)
 			err := w.StartGoTTY(bindHostname, port, "", false)
 			if nil != err {
 				panic(err)
@@ -181,13 +182,12 @@ func main() {
 			if nil != err {
 				panic(err)
 			}
-			fmt.Printf("stdin/stdout baud %d, device %s\n", baud, devPath)
+			log.Printf("stdin/stdout baud %d, device %s\n", baud, devPath)
 			defer i.Close()
 			setRaw(&once)
 			// Copy serial out to stdout
 			go func() {
 				io.Copy(os.Stdout, i)
-
 			}()
 
 			// Copy stdin to serial

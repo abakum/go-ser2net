@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/PatrickRudolph/telnet"
 	"github.com/PatrickRudolph/telnet/options"
+	"github.com/abakum/go-console"
 	"github.com/sorenisanerd/gotty/server"
 	"github.com/sorenisanerd/gotty/utils"
 	"go.bug.st/serial"
@@ -51,6 +53,8 @@ type SerialWorker struct {
 	web      *server.Server
 	url      string
 	quitting bool
+	shell    *likeSerialPort
+	args     []string
 }
 
 func SerialClose(port serial.Port) error {
@@ -128,6 +132,10 @@ func (m Mode) String() string {
 	if m.Name != "" {
 		name += m.Name + "@"
 	}
+	if m.DataBits == 0 {
+		return fmt.Sprintf("%s%d",
+			name, m.BaudRate)
+	}
 	return fmt.Sprintf("%s%d,%d,%s,%s",
 		name, m.BaudRate, m.DataBits, p, s)
 }
@@ -166,10 +174,6 @@ func (w *SerialWorker) Mode() serial.Mode {
 	return w.mode
 }
 
-// func (w *SerialWorker) Path() string {
-// 	return w.path
-// }
-
 func (w *SerialWorker) SerialClose() error {
 	w.connected = false
 	return SerialClose(w.serialConn)
@@ -190,15 +194,26 @@ func (w *SerialWorker) connectSerial() {
 	if w.quitting {
 		return
 	}
-	// fmt.Println("connectSerial...")
-
+	// log.Println("connectSerial...")
+	if len(w.args) > 0 {
+		// log.Println(w.path, w.args)
+		if w.shell != nil {
+			w.connected = true
+			return
+		}
+		var err error
+		w.serialConn, w.shell, err = open(w)
+		// log.Println(w.args, err)
+		w.connected = err == nil
+		return
+	}
 	// Poll on Serial to open (Testing)
 	con, err := serial.Open(w.path, &w.mode)
 	for err != nil {
 		select {
 		case <-w.context.Done():
 			w.quitting = true
-			// fmt.Println("...connectSerial")
+			// log.Println("...connectSerial")
 			return
 		default:
 			time.Sleep(time.Second)
@@ -208,17 +223,17 @@ func (w *SerialWorker) connectSerial() {
 
 	w.serialConn = con
 	w.connected = true
-	// fmt.Println("...connectSerial")
+	// log.Println("...connectSerial")
 }
 
 func (w *SerialWorker) txWorker() {
 	if w.quitting {
 		return
 	}
-	// fmt.Println("txWorker...")
+	// log.Println("txWorker...")
 	defer func() {
 		w.quitting = true
-		// fmt.Println("...txWorker")
+		// log.Println("...txWorker")
 	}()
 	for {
 		select {
@@ -235,7 +250,7 @@ func (w *SerialWorker) txWorker() {
 
 					porterr, ok := err.(serial.PortError)
 					if ok {
-						fmt.Printf("ERR: Writing failed %s\n", porterr.EncodedErrorString())
+						log.Printf("ERR: Writing failed %s\n", porterr.EncodedErrorString())
 						w.lastErr = porterr.EncodedErrorString()
 					}
 					w.SerialClose()
@@ -258,12 +273,12 @@ func (w *SerialWorker) rxWorker() {
 	if w.quitting {
 		return
 	}
-	// fmt.Println("rxWorker...")
+	// log.Println("rxWorker...")
 
 	b := make([]byte, B16)
 	defer func() {
 		w.quitting = true
-		// fmt.Println("...rxWorker")
+		// log.Println("...rxWorker")
 	}()
 
 	// Transmit to telnet
@@ -291,12 +306,15 @@ func (w *SerialWorker) rxWorker() {
 						continue
 					}
 
-					fmt.Printf("error reading from serial: %v\n", err)
+					log.Printf("error reading from serial: %v\n", err)
+					if err == io.EOF {
+						time.AfterFunc(time.Millisecond*10, func() { fmt.Print("\rPress ^Z") })
+					}
 					w.connected = false
 
 					porterr, ok := err.(serial.PortError)
 					if ok {
-						fmt.Printf("ERR: Reading failed %s\n", porterr.EncodedErrorString())
+						log.Printf("ERR: Reading failed %s\n", porterr.EncodedErrorString())
 						w.lastErr = porterr.EncodedErrorString()
 					}
 				}
@@ -312,7 +330,7 @@ func (w *SerialWorker) Worker() {
 	if w.quitting {
 		return
 	}
-	// fmt.Println("Worker...")
+	// log.Println("Worker...")
 	// Receive from telnet
 	go w.txWorker()
 	for !w.quitting {
@@ -338,13 +356,13 @@ func (w *SerialWorker) Worker() {
 		}
 		w.SerialClose()
 	}
-	// fmt.Println("...Worker")
+	// log.Println("...Worker")
 	w.Stop()
 }
 
 // Serve is invoked by an external entity to provide a Reader and Writer interface
 func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader) {
-	// fmt.Println("serve...")
+	// log.Println("serve...")
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -356,12 +374,12 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 	w.mux.Unlock()
 
 	go func() {
-		// fmt.Println("serve Write...")
+		// log.Println("serve Write...")
 		var lastchar byte
 		defer func() {
 			// w.quitting = true
 			rr.(*telnet.Connection).Close()
-			// fmt.Println("...serve Write")
+			// log.Println("...serve Write")
 			wg.Done()
 		}()
 
@@ -392,12 +410,12 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 		}
 	}()
 	go func() {
-		// fmt.Println("serve Read...")
+		// log.Println("serve Read...")
 		p := make([]byte, K1)
 		defer func() {
 			// w.quitting = true
 			wr.(*telnet.Connection).Close()
-			// fmt.Println("...serve Read")
+			// log.Println("...serve Read")
 			wg.Done()
 		}()
 
@@ -435,18 +453,18 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 	}
 	w.rxJobQueue = new
 	w.mux.Unlock()
-	// fmt.Println("...serve")
+	// log.Println("...serve")
 }
 
 // ServeTELNET is the worker operating the telnet port - used by reiver/go-telnet
 func (w *SerialWorker) HandleTelnet(conn *telnet.Connection) {
-	// fmt.Println("HandleTelnet...")
+	// log.Println("HandleTelnet...")
 	if w.quitting {
 		return
 	}
 	w.serve(w.context, conn, conn)
 	conn.Close()
-	// fmt.Println("...HandleTelnet")
+	// log.Println("...HandleTelnet")
 }
 
 // Close removes the channel from the internal list
@@ -571,16 +589,19 @@ func (w *SerialWorker) New(params map[string][]string, _ map[string][]string) (s
 
 // NewIoReadWriteCloser returns a ReadWriteCloser interface
 func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) {
-	time.Sleep(time.Millisecond * 77)
-	if !w.connected {
-		err = fmt.Errorf("not connected to %s. Last error:%s", w.path, w.lastErr)
-		return
-	}
-	rx := w.Open()
-	s = &SerialIOWorker{w: w,
-		rx: rx,
-	}
+	for i := 0; i < 20; i++ {
+		if w.connected {
+			log.Println(w.path, "connected in", i*10, "milliseconds")
+			rx := w.Open()
+			s = &SerialIOWorker{w: w,
+				rx: rx,
+			}
 
+			return
+		}
+		time.Sleep(time.Millisecond * 10)
+	}
+	err = fmt.Errorf("not connected to %s in 200 milliseconds. Last error:%s", w.path, w.lastErr)
 	return
 }
 
@@ -644,7 +665,7 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string, qu
 
 // StartTelnet starts a telnet server
 func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
-	// fmt.Println("StartTelnet...")
+	// log.Println("StartTelnet...")
 	if w.quitting {
 		return
 	}
@@ -661,7 +682,7 @@ func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
 		w.lastErr = err.Error()
 		time.Sleep(time.Millisecond * 111)
 	}
-	// fmt.Println("...StartTelnet")
+	// log.Println("...StartTelnet")
 	return
 }
 
@@ -681,6 +702,14 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 	w.lastErr = "Serial is not connected"
 	w.context = context
 	w.quitting = false
+
+	// Команда или шелл
+	args, ok := IsCommand(path)
+	if ok {
+		w.path = args[0]
+		w.args = args
+		w.lastErr = fmt.Sprintf("Command %v not started", args)
+	}
 
 	return &w, nil
 }
@@ -710,4 +739,112 @@ func BaudRate(b int, err error) (baud int) {
 		baud = b
 	}
 	return
+}
+
+type likeSerialPort struct {
+	console console.Console
+	closed  bool
+}
+
+func open(w *SerialWorker) (port serial.Port, sh *likeSerialPort, err error) {
+	sh = &likeSerialPort{}
+	ws, err := size()
+	if err != nil {
+		ws.Width = 80
+		ws.Height = 25
+	}
+	sh.console, err = console.New(int(ws.Width), int(ws.Height))
+	// log.Println(sh, err)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = sh.console.Start(w.args)
+	if err != nil {
+		return nil, nil, err
+	}
+	w.mode.BaudRate, _ = sh.console.Pid()
+	w.mode.DataBits = 0
+	return sh, sh, err
+}
+
+func (likeSerialPort) Break(time.Duration) error {
+	return nil
+}
+func (l *likeSerialPort) Close() error {
+	if l.console == nil {
+		return nil
+	}
+	if l.closed {
+		return nil
+	}
+	l.closed = true
+	return l.console.Close()
+}
+func (likeSerialPort) Drain() error {
+	return nil
+}
+func (likeSerialPort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
+	return nil, nil
+}
+func (l likeSerialPort) Read(p []byte) (n int, err error) {
+	if l.console == nil {
+		return len(p), nil
+	}
+	return l.console.Read(p)
+}
+func (likeSerialPort) ResetInputBuffer() error {
+	return nil
+}
+func (likeSerialPort) ResetOutputBuffer() error {
+	return nil
+}
+func (likeSerialPort) SetDTR(dtr bool) error {
+	return nil
+}
+func (likeSerialPort) SetRTS(rts bool) error {
+	return nil
+}
+func (likeSerialPort) SetMode(mode *serial.Mode) error {
+	return nil
+}
+func (likeSerialPort) SetReadTimeout(t time.Duration) error {
+	return nil
+}
+func (l likeSerialPort) Write(p []byte) (n int, err error) {
+	if l.console == nil {
+		return len(p), nil
+	}
+	return l.console.Write(p)
+}
+
+type WinSize struct {
+	// Height of the console
+	Height uint16
+	// Width of the console
+	Width uint16
+}
+
+func isFileExist(path string) bool {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return false
+	}
+	return true
+}
+
+func IsCommand(path string) (args []string, ok bool) {
+	args, err := splitCommandLine(path)
+	if err == nil {
+		arg0 := args[0]
+		args[0], err = exec.LookPath(args[0])
+		ok = err == nil && isFileExist(args[0]) && !serialPath(arg0)
+	}
+	return
+}
+
+func serialPath(path string) bool {
+	if len(path) == 0 {
+		return false
+	}
+	suff := path[len(path)-1:]
+	return suff >= "0" && suff <= "9"
 }
