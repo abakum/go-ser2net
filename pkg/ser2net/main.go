@@ -250,7 +250,7 @@ func (w *SerialWorker) txWorker() {
 
 					porterr, ok := err.(serial.PortError)
 					if ok {
-						log.Printf("ERR: Writing failed %s\n", porterr.EncodedErrorString())
+						log.Printf("ERR: Writing failed %s\r\n", porterr.EncodedErrorString())
 						w.lastErr = porterr.EncodedErrorString()
 					}
 					w.SerialClose()
@@ -305,16 +305,16 @@ func (w *SerialWorker) rxWorker() {
 					if err == syscall.EINTR {
 						continue
 					}
-
-					log.Printf("error reading from serial: %v\n", err)
 					if err == io.EOF {
-						time.AfterFunc(time.Millisecond*10, func() { fmt.Print("\rPress ^Z") })
+						log.Printf("%v Press <Enter><Enter>\r\n", err)
+					} else {
+						log.Printf("error reading from serial: %v\r\n", err)
 					}
 					w.connected = false
 
 					porterr, ok := err.(serial.PortError)
 					if ok {
-						log.Printf("ERR: Reading failed %s\n", porterr.EncodedErrorString())
+						log.Printf("ERR: Reading failed %s\r\n", porterr.EncodedErrorString())
 						w.lastErr = porterr.EncodedErrorString()
 					}
 				}
@@ -591,7 +591,7 @@ func (w *SerialWorker) New(params map[string][]string, _ map[string][]string) (s
 func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) {
 	for i := 0; i < 20; i++ {
 		if w.connected {
-			log.Println(w.path, "connected in", i*10, "milliseconds")
+			log.Println(w.path, "connected in", i*10, "milliseconds\r")
 			rx := w.Open()
 			s = &SerialIOWorker{w: w,
 				rx: rx,
