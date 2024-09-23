@@ -301,12 +301,19 @@ func (w *SerialWorker) rxWorker() {
 			}
 
 			if err != nil {
+				if !w.connected {
+					return
+				}
 				if !w.quitting {
 					if err == syscall.EINTR {
 						continue
 					}
 					if err == io.EOF {
-						log.Printf("%v Press <Enter><Enter>\r\n", err)
+						cancel := "^C"
+						if runtime.GOOS == "windows" {
+							cancel = "^Z"
+						}
+						log.Printf("%v Press %s\r\n", err, cancel)
 					} else {
 						log.Printf("error reading from serial: %v\r\n", err)
 					}
@@ -591,7 +598,7 @@ func (w *SerialWorker) New(params map[string][]string, _ map[string][]string) (s
 func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) {
 	for i := 0; i < 20; i++ {
 		if w.connected {
-			log.Println(w.path, "connected in", i*10, "milliseconds\r")
+			log.Println(w, "in", i*10, "milliseconds\r")
 			rx := w.Open()
 			s = &SerialIOWorker{w: w,
 				rx: rx,
