@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"context"
 	"flag"
-	"io"
 	"log"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/abakum/go-ser2net/pkg/ser2net"
 	"github.com/mattn/go-isatty"
@@ -20,7 +20,8 @@ import (
 )
 
 func main() {
-	log.SetFlags(log.Llongfile)
+	log.SetFlags(log.Llongfile | log.Lmicroseconds)
+	log.SetPrefix("\r")
 	port := 2323
 	devPath := `COM3`
 	// devPath := `cmd`
@@ -55,7 +56,11 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer closer.Close()
-	closer.Bind(cancel)
+	closer.Bind(func() {
+		if ctx.Err() == nil {
+			cancel()
+		}
+	})
 
 	if configPath != "" {
 		var wg sync.WaitGroup
@@ -162,15 +167,29 @@ func main() {
 		// }()
 		go w.Worker()
 
+		go func() {
+			o := ""
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Second):
+					n := w.String()
+					if o != n {
+						log.Print(n, "\r\n")
+						o = n
+					}
+				}
+			}
+		}()
+
 		if useTelnet != nil && *useTelnet {
-			log.Printf("telnet on port %d baud %d, device %s\n", port, baud, devPath)
 			err := w.StartTelnet(bindHostname, port)
 			// time.Sleep(time.Second * 5)
 			if nil != err {
 				panic(err)
 			}
 		} else if useGotty != nil && *useGotty {
-			log.Printf("gotty on port %d baud %d, device %s\n", port, baud, devPath)
 			err := w.StartGoTTY(bindHostname, port, "", false)
 			if nil != err {
 				panic(err)
@@ -182,23 +201,20 @@ func main() {
 			if nil != err {
 				panic(err)
 			}
-			log.Printf("stdin/stdout baud %d, device %s\n", baud, devPath)
 			defer i.Close()
 			setRaw(&once)
 			// Copy serial out to stdout
 			go func() {
-				io.Copy(os.Stdout, i)
+				w.Copy(os.Stdout, i)
 			}()
 
-			// Copy stdin to serial
-			io.Copy(i, os.Stdin)
+			w.CopyAfter(i, os.Stdin, time.Millisecond*77)
 
 		} else {
 			panic("Must specify one of [telnet, gotty]")
 		}
 	}
 
-	cancel()
 }
 
 func setRaw(already *bool) {

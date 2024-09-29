@@ -215,8 +215,7 @@ func (w *SerialWorker) connectSerial() {
 			w.quitting = true
 			// log.Println("...connectSerial")
 			return
-		default:
-			time.Sleep(time.Second)
+		case <-time.After(time.Second):
 			con, err = serial.Open(w.path, &w.mode)
 		}
 	}
@@ -286,7 +285,7 @@ func (w *SerialWorker) rxWorker() {
 		select {
 		case <-w.context.Done():
 			return
-		default:
+		case <-time.After(time.Millisecond):
 			n, err := w.serialConn.Read(b)
 
 			if n > 0 {
@@ -309,11 +308,8 @@ func (w *SerialWorker) rxWorker() {
 						continue
 					}
 					if err == io.EOF {
-						cancel := "^C"
-						if runtime.GOOS == "windows" {
-							cancel = "^Z"
-						}
-						log.Printf("%v Press %s\r\n", err, cancel)
+						log.Printf("%v\r\n", err)
+						w.Stop()
 					} else {
 						log.Printf("error reading from serial: %v\r\n", err)
 					}
@@ -356,8 +352,7 @@ func (w *SerialWorker) Worker() {
 			case <-w.context.Done():
 				w.quitting = true
 				break loop
-			default:
-				time.Sleep(time.Second)
+			case <-time.After(time.Second):
 				_, err = os.Stat(w.path)
 			}
 		}
@@ -430,7 +425,7 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 			select {
 			case <-context.Done():
 				return
-			default:
+			case <-time.After(time.Millisecond):
 				n, err := rr.Read(p)
 				if err != nil && strings.Contains(strings.ToLower(err.Error()), "i/o timeout") {
 					time.Sleep(time.Microsecond)
@@ -598,12 +593,12 @@ func (w *SerialWorker) New(params map[string][]string, _ map[string][]string) (s
 func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) {
 	for i := 0; i < 20; i++ {
 		if w.connected {
-			log.Println(w, "in", i*10, "milliseconds\r")
+			// log.Println(w, "in", i*10, "milliseconds\r")
 			rx := w.Open()
 			s = &SerialIOWorker{w: w,
 				rx: rx,
 			}
-
+			w.context, w.cancel = context.WithCancel(w.context)
 			return
 		}
 		time.Sleep(time.Millisecond * 10)
@@ -654,9 +649,7 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string, qu
 	}
 
 	w.web = srv
-	ctx, cancel := context.WithCancel(w.context)
-	w.context = ctx
-	w.cancel = cancel
+	w.context, w.cancel = context.WithCancel(w.context)
 	w.url = fmt.Sprintf("http://%s", net.JoinHostPort(appOptions.Address, appOptions.Port))
 	err = srv.Run(w.context)
 	w.Stop()
@@ -676,9 +669,7 @@ func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
 	if w.quitting {
 		return
 	}
-	ctx, cancel := context.WithCancel(w.context)
-	w.context = ctx
-	w.cancel = cancel
+	w.context, w.cancel = context.WithCancel(w.context)
 	w.rfc2217 = telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption)
 	w.url = "telnet://" + w.rfc2217.Address
 	err = w.rfc2217.ListenAndServe()
@@ -854,4 +845,53 @@ func serialPath(path string) bool {
 	}
 	suff := path[len(path)-1:]
 	return suff >= "0" && suff <= "9"
+}
+
+// https://github.com/northbright/iocopy/blob/master/iocopy.go
+// readFunc is used to implement [io.Reader] interface and capture the [context.Context] parameter.
+type readFunc func(p []byte) (n int, err error)
+
+// https://github.com/northbright/iocopy/blob/master/iocopy.go
+// Read implements [io.Reader] interface.
+func (rf readFunc) Read(p []byte) (n int, err error) {
+	return rf(p)
+}
+
+// https://github.com/northbright/iocopy/blob/master/iocopy.go
+// Copy wraps [io.Copy] and accepts [context.Context] parameter.
+func Copy(ctx context.Context, dst io.Writer, src io.Reader) (written int64, err error) {
+	return io.Copy(
+		dst,
+		readFunc(func(p []byte) (n int, err error) {
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			default:
+				return src.Read(p)
+			}
+		}),
+	)
+}
+
+// Copy wraps [io.Copy] and accepts [context.Context]  and delay parameters.
+func CopyAfter(ctx context.Context, dst io.Writer, src io.Reader, delay time.Duration) (written int64, err error) {
+	return io.Copy(
+		dst,
+		readFunc(func(p []byte) (n int, err error) {
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-time.After(delay):
+				return src.Read(p)
+			}
+		}),
+	)
+}
+
+func (w *SerialWorker) Copy(dst io.Writer, src io.Reader) (written int64, err error) {
+	return Copy(w.context, dst, src)
+}
+
+func (w *SerialWorker) CopyAfter(dst io.Writer, src io.Reader, delay time.Duration) (written int64, err error) {
+	return CopyAfter(w.context, dst, src, delay)
 }
