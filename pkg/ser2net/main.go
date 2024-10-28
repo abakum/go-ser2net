@@ -306,7 +306,7 @@ func (w *SerialWorker) rxWorker() {
 					if err == syscall.EINTR {
 						continue
 					}
-					if err == io.EOF {
+					if err == io.EOF || strings.Contains(err.Error(), "/dev/ptmx:") {
 						log.Printf("%v\r\n", err)
 						w.Stop()
 					} else {
