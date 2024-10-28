@@ -22,9 +22,10 @@ import (
 func main() {
 	log.SetFlags(log.Llongfile | log.Lmicroseconds)
 	log.SetPrefix("\r")
+	port := 2323
 	devPath := `COM3`
 	// devPath := `cmd`
-	// devPath := `:2322`
+	// devPath := `:2323`
 	configPath := ""
 	bindHostname := ""
 	telnet := false
