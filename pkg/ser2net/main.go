@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -53,7 +54,7 @@ type SerialWorker struct {
 	web      *server.Server
 	url      string
 	quitting bool
-	shell    *likeSerialPort
+	like     *likeSerialPort
 	args     []string
 }
 
@@ -195,15 +196,13 @@ func (w *SerialWorker) connectSerial() {
 		return
 	}
 	// log.Println("connectSerial...")
-	if len(w.args) > 0 {
-		// log.Println(w.path, w.args)
-		if w.shell != nil {
+	if len(w.args) > 0 || !SerialPath(w.path) {
+		if w.like != nil {
 			w.connected = true
 			return
 		}
 		var err error
-		w.serialConn, w.shell, err = open(w)
-		// log.Println(w.args, err)
+		w.serialConn, w.like, err = openLike(w)
 		w.connected = err == nil
 		return
 	}
@@ -342,7 +341,10 @@ func (w *SerialWorker) Worker() {
 		// Transmit to telnet
 		go w.rxWorker()
 
-		_, err := os.Stat(w.path)
+		var err error
+		if w.like == nil || w.like.command {
+			_, err = os.Stat(w.path)
+		}
 
 	loop:
 		// Windows after open serial port block access to it
@@ -353,7 +355,9 @@ func (w *SerialWorker) Worker() {
 				w.quitting = true
 				break loop
 			case <-time.After(time.Second):
-				_, err = os.Stat(w.path)
+				if w.like == nil || w.like.command {
+					_, err = os.Stat(w.path)
+				}
 			}
 		}
 		w.SerialClose()
@@ -701,12 +705,14 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 	w.context = context
 	w.quitting = false
 
-	// Команда или шелл
+	// Команда или интерпретатор команд
 	args, ok := IsCommand(path)
 	if ok {
 		w.path = args[0]
 		w.args = args
 		w.lastErr = fmt.Sprintf("Command %v not started", args)
+	} else if !SerialPath(path) {
+		w.lastErr = fmt.Sprintf("Serial over telnet://%s is not connected", path)
 	}
 
 	return &w, nil
@@ -742,42 +748,74 @@ func BaudRate(b int, err error) (baud int) {
 type likeSerialPort struct {
 	console console.Console
 	closed  bool
+	conn    net.Conn
+	command bool
 }
 
-func open(w *SerialWorker) (port serial.Port, sh *likeSerialPort, err error) {
-	sh = &likeSerialPort{}
-	ws, err := size()
-	if err != nil {
-		ws.Width = 80
-		ws.Height = 25
+func openLike(w *SerialWorker) (port serial.Port, l *likeSerialPort, err error) {
+	l = &likeSerialPort{}
+	l.command = len(w.args) > 0
+	if l.command {
+		ws, err := size()
+		if err != nil {
+			ws.Width = 80
+			ws.Height = 25
+		}
+		l.console, err = console.New(int(ws.Width), int(ws.Height))
+		// log.Println(l, err)
+		if err != nil {
+			return nil, nil, err
+		}
+		err = l.console.Start(w.args)
+		if err != nil {
+			return nil, nil, err
+		}
+		w.mode.BaudRate, _ = l.console.Pid()
+		w.mode.DataBits = 0
+		return l, l, err
 	}
-	sh.console, err = console.New(int(ws.Width), int(ws.Height))
-	// log.Println(sh, err)
+	l.conn, err = telnet.Dial(w.path)
+	// l.conn, err = net.Dial("tcp", w.path)
+	// log.Println(w.path, l, err)
 	if err != nil {
 		return nil, nil, err
 	}
-	err = sh.console.Start(w.args)
-	if err != nil {
-		return nil, nil, err
+	w.mode.BaudRate = 0
+	_, localPort, er := net.SplitHostPort(l.conn.LocalAddr().String())
+	if er == nil {
+		lp, er := strconv.Atoi(localPort)
+		if er == nil {
+			w.mode.BaudRate = lp
+		}
 	}
-	w.mode.BaudRate, _ = sh.console.Pid()
 	w.mode.DataBits = 0
-	return sh, sh, err
+	return l, l, err
 }
 
 func (likeSerialPort) Break(time.Duration) error {
 	return nil
 }
 func (l *likeSerialPort) Close() error {
-	if l.console == nil {
+	if l.command {
+		if l.console == nil {
+			return nil
+		}
+		if l.closed {
+			return nil
+		}
+		l.closed = true
+		return l.console.Close()
+	}
+	if l.conn == nil {
 		return nil
 	}
 	if l.closed {
 		return nil
 	}
 	l.closed = true
-	return l.console.Close()
+	return l.conn.Close()
 }
+
 func (likeSerialPort) Drain() error {
 	return nil
 }
@@ -785,10 +823,16 @@ func (likeSerialPort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
 	return nil, nil
 }
 func (l likeSerialPort) Read(p []byte) (n int, err error) {
-	if l.console == nil {
+	if l.command {
+		if l.console == nil {
+			return len(p), nil
+		}
+		return l.console.Read(p)
+	}
+	if l.conn == nil {
 		return len(p), nil
 	}
-	return l.console.Read(p)
+	return l.conn.Read(p)
 }
 func (likeSerialPort) ResetInputBuffer() error {
 	return nil
@@ -809,10 +853,16 @@ func (likeSerialPort) SetReadTimeout(t time.Duration) error {
 	return nil
 }
 func (l likeSerialPort) Write(p []byte) (n int, err error) {
-	if l.console == nil {
+	if l.command {
+		if l.console == nil {
+			return len(p), nil
+		}
+		return l.console.Write(p)
+	}
+	if l.conn == nil {
 		return len(p), nil
 	}
-	return l.console.Write(p)
+	return l.conn.Write(p)
 }
 
 type WinSize struct {
@@ -829,18 +879,19 @@ func isFileExist(path string) bool {
 	return true
 }
 
+// Похож ли path на команду
 func IsCommand(path string) (args []string, ok bool) {
 	args, err := splitCommandLine(path)
 	if err == nil {
-		arg0 := args[0]
 		args[0], err = exec.LookPath(args[0])
-		ok = err == nil && isFileExist(args[0]) && !serialPath(arg0)
+		ok = err == nil && isFileExist(args[0]) && !SerialPath(path)
 	}
 	return
 }
 
-func serialPath(path string) bool {
-	if len(path) == 0 {
+// Похож ли path на последовательную консоль
+func SerialPath(path string) bool {
+	if path == "" || strings.Contains(path, " ") || strings.Contains(path, ":") {
 		return false
 	}
 	suff := path[len(path)-1:]
