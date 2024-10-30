@@ -27,8 +27,8 @@ import (
 const (
 	B16 = 16
 	K1  = 1024
-	K4  = 4 * 1024
-	K32 = 32 * 1024
+	K4  = 4 * K1
+	K32 = 32 * K1
 )
 
 // SerialWorker instances one serial-network bridge
@@ -273,7 +273,7 @@ func (w *SerialWorker) rxWorker() {
 	}
 	// log.Println("rxWorker...")
 
-	b := make([]byte, B16)
+	b := make([]byte, K1) // B16
 	defer func() {
 		w.quitting = true
 		// log.Println("...rxWorker")
