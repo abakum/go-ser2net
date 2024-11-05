@@ -56,6 +56,8 @@ type SerialWorker struct {
 	quitting bool
 	like     *likeSerialPort
 	args     []string
+	pid      int
+	remote   string
 }
 
 func SerialClose(port serial.Port) error {
@@ -70,7 +72,7 @@ func SerialClose(port serial.Port) error {
 
 type Mode struct {
 	serial.Mode
-	Name string
+	path string
 }
 
 type SerialPort struct {
@@ -103,7 +105,7 @@ func (w *SerialPort) Write1(p []byte) (n int, err error) {
 
 // Имя порта типа com3 или /dev/ttyUSB0
 func (w *SerialPort) String() string {
-	return w.Name
+	return w.path
 }
 
 func (w *SerialPort) SerialClose() error {
@@ -129,16 +131,12 @@ func (m Mode) String() string {
 	case serial.TwoStopBits:
 		s = "2"
 	}
-	name := ""
-	if m.Name != "" {
-		name += m.Name + "@"
-	}
-	if m.DataBits == 0 {
-		return fmt.Sprintf("%s%d",
-			name, m.BaudRate)
+	path := ""
+	if m.path != "" {
+		path += m.path + "@"
 	}
 	return fmt.Sprintf("%s%d,%d,%s,%s",
-		name, m.BaudRate, m.DataBits, p, s)
+		path, m.BaudRate, m.DataBits, p, s)
 }
 
 func (w *SerialWorker) String() string {
@@ -148,6 +146,25 @@ func (w *SerialWorker) String() string {
 	}
 	if w.url != "" {
 		connected += " to " + w.url
+	}
+	path := ""
+	if w.path != "" {
+		path += w.path + "@"
+	}
+	if w.like != nil {
+		if len(w.args) > 0 {
+			if w.pid > 0 {
+				return fmt.Sprintf("%s%d",
+					path, w.pid)
+			}
+			return fmt.Sprintf("%s %s",
+				path, connected)
+		}
+		return fmt.Sprintf("telnet://%s %s@%s",
+			LocalPort(w.path), connected, Mode{w.mode, ""})
+	}
+	if w.remote != "" {
+		connected += " from " + w.remote
 	}
 	return fmt.Sprintf("%s %s",
 		Mode{w.mode, w.path}, connected)
@@ -166,9 +183,12 @@ func (w *SerialWorker) Stop() {
 	}
 }
 
-func (w *SerialWorker) SetMode(mode *serial.Mode) error {
-	w.mode = *mode
-	return w.serialConn.SetMode(mode)
+func (w *SerialWorker) SetMode(mode *serial.Mode) (err error) {
+	err = w.serialConn.SetMode(mode)
+	if err == nil {
+		w.mode = *mode
+	}
+	return
 }
 
 func (w *SerialWorker) Mode() serial.Mode {
@@ -674,7 +694,9 @@ func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
 		return
 	}
 	w.context, w.cancel = context.WithCancel(w.context)
-	w.rfc2217 = telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption)
+
+	H2217 = &Handler2217{worker: w}
+	w.rfc2217 = telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption, options.NAWSOption, Server2217)
 	w.url = "telnet://" + w.rfc2217.Address
 	err = w.rfc2217.ListenAndServe()
 	w.rfc2217 = nil
@@ -748,7 +770,7 @@ func BaudRate(b int, err error) (baud int) {
 type likeSerialPort struct {
 	console console.Console
 	closed  bool
-	conn    net.Conn
+	conn    *telnet.Connection
 	command bool
 }
 
@@ -770,25 +792,20 @@ func openLike(w *SerialWorker) (port serial.Port, l *likeSerialPort, err error) 
 		if err != nil {
 			return nil, nil, err
 		}
-		w.mode.BaudRate, _ = l.console.Pid()
-		w.mode.DataBits = 0
+		w.pid, _ = l.console.Pid()
 		return l, l, err
 	}
-	l.conn, err = telnet.Dial(w.path)
+	H2217 = &Handler2217{worker: w}
+	l.conn, err = telnet.Dial(w.path, options.NAWSOption, Client2217)
+	// if _, h := conn2ch(l.conn); h != nil {
+	// 	h.worker = w
+	// }
+
 	// l.conn, err = net.Dial("tcp", w.path)
 	// log.Println(w.path, l, err)
 	if err != nil {
 		return nil, nil, err
 	}
-	w.mode.BaudRate = 0
-	_, localPort, er := net.SplitHostPort(l.conn.LocalAddr().String())
-	if er == nil {
-		lp, er := strconv.Atoi(localPort)
-		if er == nil {
-			w.mode.BaudRate = lp
-		}
-	}
-	w.mode.DataBits = 0
 	return l, l, err
 }
 
@@ -846,7 +863,12 @@ func (likeSerialPort) SetDTR(dtr bool) error {
 func (likeSerialPort) SetRTS(rts bool) error {
 	return nil
 }
-func (likeSerialPort) SetMode(mode *serial.Mode) error {
+
+func (l likeSerialPort) SetMode(mode *serial.Mode) error {
+	if l.command {
+		return nil
+	}
+	H2217.writeMode(l.conn, mode)
 	return nil
 }
 func (likeSerialPort) SetReadTimeout(t time.Duration) error {
@@ -945,4 +967,12 @@ func (w *SerialWorker) Copy(dst io.Writer, src io.Reader) (written int64, err er
 
 func (w *SerialWorker) CopyAfter(dst io.Writer, src io.Reader, delay time.Duration) (written int64, err error) {
 	return CopyAfter(w.context, dst, src, delay)
+}
+
+func LocalPort(addr string) string {
+	addr = strings.TrimPrefix(addr, ":")
+	if _, err := strconv.ParseUint(addr, 10, 16); err == nil {
+		return "127.0.0.1:" + addr
+	}
+	return addr
 }
