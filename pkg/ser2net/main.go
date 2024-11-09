@@ -184,6 +184,7 @@ func (w *SerialWorker) Stop() {
 }
 
 func (w *SerialWorker) SetMode(mode *serial.Mode) (err error) {
+	// log.Printf("SetMode %v\r\n", *mode)
 	err = w.serialConn.SetMode(mode)
 	if err == nil {
 		w.mode = *mode
@@ -650,9 +651,9 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string, qu
 
 	appOptions.Quiet = quiet
 
-	if appOptions.Quiet {
-		log.SetOutput(io.Discard)
-	}
+	// if appOptions.Quiet {
+	// 	log.SetOutput(io.Discard)
+	// }
 
 	hostname, _ := os.Hostname()
 
@@ -687,7 +688,7 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string, qu
 	return
 }
 
-// StartTelnet starts a telnet server
+// StartTelnet starts a RFC2217 telnet server
 func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
 	// log.Println("StartTelnet...")
 	if w.quitting {
@@ -695,8 +696,7 @@ func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
 	}
 	w.context, w.cancel = context.WithCancel(w.context)
 
-	H2217 = &Handler2217{worker: w}
-	w.rfc2217 = telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption, options.NAWSOption, Server2217)
+	w.rfc2217 = telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption, options.NAWSOption, NewHandler2217(w).Server2217)
 	w.url = "telnet://" + w.rfc2217.Address
 	err = w.rfc2217.ListenAndServe()
 	w.rfc2217 = nil
@@ -710,17 +710,43 @@ func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
 	return
 }
 
-// NewSerialWorker creates a new SerialWorker and connect to path@115200,8,N,1
+var DefaultMode = serial.Mode{
+	BaudRate:          9600,
+	DataBits:          8,
+	Parity:            serial.NoParity,
+	StopBits:          serial.OneStopBit,
+	InitialStatusBits: &serial.ModemOutputBits{},
+}
+
+// NewSerialWorker creates a new SerialWorker and connect to path@9600,8,N,1,N
 func NewSerialWorker(context context.Context, path string, baud int) (*SerialWorker, error) {
 	var w SerialWorker
 	w.txJobQueue = make(chan byte, K4)
-	if baud <= 0 {
-		baud = 115200
+
+	// func (port *windowsPort) setModeParams(mode *Mode, params *dcb) {
+	// 	if mode.BaudRate == 0 {
+	// 		params.BaudRate = 9600 // Default to 9600
+	// 	} else {
+	// 		params.BaudRate = uint32(mode.BaudRate)
+	// 	}
+
+	w.mode = DefaultMode
+	if baud > 0 {
+		w.mode.BaudRate = baud
 	}
-	w.mode.BaudRate = baud
-	w.mode.DataBits = 8
-	w.mode.Parity = serial.NoParity
-	w.mode.StopBits = serial.OneStopBit
+
+	// if mode.InitialStatusBits == nil {
+	// 	params.Flags |= dcbDTRControlEnable
+	// 	params.Flags |= dcbRTSControlEnable
+	// } else {
+	// 	if mode.InitialStatusBits.DTR {
+	// 		params.Flags |= dcbDTRControlEnable
+	// 	}
+	// 	if mode.InitialStatusBits.RTS {
+	// 		params.Flags |= dcbRTSControlEnable
+	// 	}
+	// }
+
 	w.path = path
 	w.connected = false
 	w.lastErr = "Serial is not connected"
@@ -795,14 +821,8 @@ func openLike(w *SerialWorker) (port serial.Port, l *likeSerialPort, err error) 
 		w.pid, _ = l.console.Pid()
 		return l, l, err
 	}
-	H2217 = &Handler2217{worker: w}
-	l.conn, err = telnet.Dial(w.path, options.NAWSOption, Client2217)
-	// if _, h := conn2ch(l.conn); h != nil {
-	// 	h.worker = w
-	// }
+	l.conn, err = telnet.Dial(w.path, options.NAWSOption, NewHandler2217(w).Client2217)
 
-	// l.conn, err = net.Dial("tcp", w.path)
-	// log.Println(w.path, l, err)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -868,7 +888,16 @@ func (l likeSerialPort) SetMode(mode *serial.Mode) error {
 	if l.command {
 		return nil
 	}
-	H2217.writeMode(l.conn, mode)
+	n, ok := l.conn.OptionHandlers[COMPORT]
+	if !ok {
+		return nil
+	}
+
+	h, ok := n.(*Handler2217)
+	if !ok {
+		return nil
+	}
+	h.setMode(l.conn, mode)
 	return nil
 }
 func (likeSerialPort) SetReadTimeout(t time.Duration) error {
