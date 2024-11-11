@@ -50,14 +50,18 @@ type SerialWorker struct {
 
 	context  context.Context
 	cancel   context.CancelFunc
-	rfc2217  *telnet.Server
 	web      *server.Server
 	url      string
 	quitting bool
-	like     *likeSerialPort
-	args     []string
-	pid      int
-	remote   string
+	// Shell & command
+	like *likeSerialPort
+	args []string
+	pid  int
+	// RFC 2217
+	rfc2217 *telnet.Server
+	clm     sync.Mutex
+	cls     map[string]Client
+	remote  string
 }
 
 func SerialClose(port serial.Port) error {
@@ -138,6 +142,9 @@ func (m Mode) String() string {
 	return fmt.Sprintf("%s%d,%d,%s,%s",
 		path, m.BaudRate, m.DataBits, p, s)
 }
+func (w *SerialWorker) Url() string {
+	return w.url
+}
 
 func (w *SerialWorker) String() string {
 	connected := "connected"
@@ -159,6 +166,10 @@ func (w *SerialWorker) String() string {
 			}
 			return fmt.Sprintf("%s %s",
 				path, connected)
+		}
+		if !LastDigit(w.url) && w.url != "" {
+			return fmt.Sprintf("telnet://%s %s",
+				LocalPort(w.path), connected)
 		}
 		return fmt.Sprintf("telnet://%s %s@%s",
 			LocalPort(w.path), connected, Mode{w.mode, ""})
@@ -184,10 +195,44 @@ func (w *SerialWorker) Stop() {
 }
 
 func (w *SerialWorker) SetMode(mode *serial.Mode) (err error) {
-	// log.Printf("SetMode %v\r\n", *mode)
+	log.Printf("SetMode %+v %+v\r\n", *mode, w.cls)
 	err = w.serialConn.SetMode(mode)
-	if err == nil {
+	if err == nil && len(w.args) == 0 {
 		w.mode = *mode
+		// Рассылает изменения mode всем.
+		for _, cl := range w.cls {
+			if !cl.enable {
+				continue
+			}
+			ok := false
+			if cl.other.BaudRate != mode.BaudRate {
+				if w.baudRate(cl.c) == nil {
+					cl.other.BaudRate = mode.BaudRate
+					ok = true
+				}
+			}
+			if cl.other.DataBits != mode.DataBits {
+				if w.dataBits(cl.c) == nil {
+					cl.other.DataBits = mode.DataBits
+					ok = true
+				}
+			}
+			if cl.other.Parity != mode.Parity {
+				if w.parity(cl.c) == nil {
+					cl.other.Parity = mode.Parity
+					ok = true
+				}
+			}
+			if cl.other.StopBits != mode.StopBits {
+				if w.stopBits(cl.c) == nil {
+					cl.other.StopBits = mode.StopBits
+					ok = true
+				}
+			}
+			if ok {
+				w.set(cl.c, cl)
+			}
+		}
 	}
 	return
 }
@@ -696,7 +741,7 @@ func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
 	}
 	w.context, w.cancel = context.WithCancel(w.context)
 
-	w.rfc2217 = telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption, options.NAWSOption, NewHandler2217(w).Server2217)
+	w.rfc2217 = telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption, options.NAWSOption, w.Server2217)
 	w.url = "telnet://" + w.rfc2217.Address
 	err = w.rfc2217.ListenAndServe()
 	w.rfc2217 = nil
@@ -711,16 +756,34 @@ func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
 }
 
 var DefaultMode = serial.Mode{
-	BaudRate:          9600,
-	DataBits:          8,
-	Parity:            serial.NoParity,
-	StopBits:          serial.OneStopBit,
+	BaudRate: 9600,
+	DataBits: 8,
+	Parity:   serial.NoParity,
+	StopBits: serial.OneStopBit,
+
+	// if mode.InitialStatusBits == nil {
+	// 	params.Flags |= dcbDTRControlEnable
+	// 	params.Flags |= dcbRTSControlEnable
+	// } else {
+	// 	if mode.InitialStatusBits.DTR {
+	// 		params.Flags |= dcbDTRControlEnable
+	// 	}
+	// 	if mode.InitialStatusBits.RTS {
+	// 		params.Flags |= dcbRTSControlEnable
+	// 	}
+	// }
 	InitialStatusBits: &serial.ModemOutputBits{},
 }
 
-// NewSerialWorker creates a new SerialWorker and connect to path@9600,8,N,1,N
+// NewSerialWorker creates a new SerialWorker and connect to path@baud,8,N,1,N.
+// Если path пустой то это для клиента RFC2217.
 func NewSerialWorker(context context.Context, path string, baud int) (*SerialWorker, error) {
 	var w SerialWorker
+	if path == "" {
+		w.mode = serial.Mode{}
+		w.cls = make(map[string]Client)
+		return &w, nil
+	}
 	w.txJobQueue = make(chan byte, K4)
 
 	// func (port *windowsPort) setModeParams(mode *Mode, params *dcb) {
@@ -735,23 +798,12 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 		w.mode.BaudRate = baud
 	}
 
-	// if mode.InitialStatusBits == nil {
-	// 	params.Flags |= dcbDTRControlEnable
-	// 	params.Flags |= dcbRTSControlEnable
-	// } else {
-	// 	if mode.InitialStatusBits.DTR {
-	// 		params.Flags |= dcbDTRControlEnable
-	// 	}
-	// 	if mode.InitialStatusBits.RTS {
-	// 		params.Flags |= dcbRTSControlEnable
-	// 	}
-	// }
-
 	w.path = path
 	w.connected = false
 	w.lastErr = "Serial is not connected"
 	w.context = context
 	w.quitting = false
+	w.cls = make(map[string]Client)
 
 	// Команда или интерпретатор команд
 	args, ok := IsCommand(path)
@@ -821,7 +873,7 @@ func openLike(w *SerialWorker) (port serial.Port, l *likeSerialPort, err error) 
 		w.pid, _ = l.console.Pid()
 		return l, l, err
 	}
-	l.conn, err = telnet.Dial(w.path, options.NAWSOption, NewHandler2217(w).Client2217)
+	l.conn, err = telnet.Dial(w.path, options.NAWSOption, w.Client2217)
 
 	if err != nil {
 		return nil, nil, err
@@ -885,19 +937,6 @@ func (likeSerialPort) SetRTS(rts bool) error {
 }
 
 func (l likeSerialPort) SetMode(mode *serial.Mode) error {
-	if l.command {
-		return nil
-	}
-	n, ok := l.conn.OptionHandlers[COMPORT]
-	if !ok {
-		return nil
-	}
-
-	h, ok := n.(*Handler2217)
-	if !ok {
-		return nil
-	}
-	h.setMode(l.conn, mode)
 	return nil
 }
 func (likeSerialPort) SetReadTimeout(t time.Duration) error {
@@ -942,7 +981,14 @@ func IsCommand(path string) (args []string, ok bool) {
 
 // Похож ли path на последовательную консоль
 func SerialPath(path string) bool {
-	if path == "" || strings.Contains(path, " ") || strings.Contains(path, ":") {
+	if strings.Contains(path, " ") || strings.Contains(path, ":") {
+		return false
+	}
+	return LastDigit(path)
+}
+
+func LastDigit(path string) bool {
+	if path == "" {
 		return false
 	}
 	suff := path[len(path)-1:]

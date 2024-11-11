@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/PatrickRudolph/telnet"
@@ -27,130 +26,151 @@ const (
 	CONTROL
 )
 
-// Handler2217 negotiates Com Port for a specific connection.
-
-type Handler2217 struct {
-	old    map[string]serial.Mode
-	enable map[string]bool
-	worker *SerialWorker
-	client bool
-	sync.Mutex
+// Клиент.
+type Client struct {
+	c      *telnet.Connection
+	other  serial.Mode
+	enable bool
+	last   time.Time
 }
 
-func NewHandler2217(w *SerialWorker) *Handler2217 {
-	return &Handler2217{
-		old:    make(map[string]serial.Mode),
-		enable: make(map[string]bool),
-		worker: w,
-	}
-}
-
-// Возвращает m e и создаёт их
-func (h *Handler2217) me(c *telnet.Connection) (m serial.Mode, e bool) {
-	s := c.RemoteAddr().String()
-	e, ok := h.enable[s]
-	if ok {
-		m = h.old[s]
+// Переключает клиента.
+func (w *SerialWorker) setEnable(c *telnet.Connection, b bool) {
+	cl := w.get(c)
+	if cl.enable == b {
 		return
 	}
-	log.Printf("-----------%s", s)
-	e = false
-	h.enable[s] = e
+	cl.enable = b
+	w.set(c, cl)
+}
 
-	m = serial.Mode{}
-	h.old[s] = m
+// Включен ли клиент.
+func (w *SerialWorker) enable(c *telnet.Connection) bool {
+	return w.get(c).enable
+}
+
+// Возвращает данные клиента и создаёт его если не было
+func (w *SerialWorker) get(c *telnet.Connection) (cl Client) {
+	s := c.RemoteAddr().String()
+	cl, ok := w.cls[s]
+	if ok {
+		return
+	}
+	cl = Client{
+		other: w.mode,
+		c:     c,
+	}
+	w.set(c, cl)
 	return
 }
-func (h *Handler2217) meSet(c *telnet.Connection, m serial.Mode, e bool) {
+
+// Обновляет или добавляет данные о клиенте
+func (w *SerialWorker) set(c *telnet.Connection, cl Client) {
 	s := c.RemoteAddr().String()
-	h.enable[s] = e
-	h.old[s] = m
+	cl.last = time.Now()
+	w.clm.Lock()
+	w.cls[s] = cl
+	w.clm.Unlock()
 }
 
-func (h *Handler2217) meDel(c *telnet.Connection) {
+// Удаляет клиента
+func (w *SerialWorker) meDel(c *telnet.Connection) {
 	s := c.RemoteAddr().String()
-	delete(h.old, s)
-	delete(h.enable, s)
+	w.clm.Lock()
+	delete(w.cls, s)
+	w.clm.Unlock()
 }
 
 // Server2217 enables Com Port negotiation on a Server.
-func (h *Handler2217) Server2217(c *telnet.Connection) telnet.Negotiator {
-	m, e := h.me(c)
-	log.Printf("Server2217 %s->%s %v %v\r\n", c.LocalAddr(), c.RemoteAddr(), m, e)
+// Добавляет клиента в h.cons при подключении.
+// Убирает клиента из h.cons когда соединение с ним прекращается.
+func (w *SerialWorker) Server2217(c *telnet.Connection) telnet.Negotiator {
+	if len(w.args) > 0 {
+		return w
+	}
+	log.Printf("RFC2217 telnet server %s accepted connection from %s. Mode: %v\r\n", c.LocalAddr(), c.RemoteAddr(), w.mode)
 	go func() {
 		defer func() {
-			h.meDel(c)
-			log.Printf("Server2217 %s->%s %s\r\n", c.LocalAddr(), c.RemoteAddr(), "done")
+			w.meDel(c)
+			log.Printf("RFC2217 telnet client from %s is disconnected\r\n", c.RemoteAddr())
 		}()
-		// Мониторим изменения на сервере режима последовательной консоли
-		i := 0 // Времянка
 		for {
-			if h == nil {
+			if w == nil {
 				return
 			}
 			select {
-			case <-h.worker.context.Done():
-				h.IAC(c, telnet.DONT, h.OptionCode())
+			case <-w.context.Done():
+				w.iac(c, telnet.DONT, w.OptionCode())
 				return
-			case <-time.After(time.Second):
-				i++
-				if i > 30 {
-					if h.Controll(c) != nil {
-						return
-					}
-					i = 0
+			case <-time.After(time.Second * 60):
+				cl := w.get(c)
+				if time.Since(cl.last) < time.Second*59 {
+					continue
 				}
-				h.setMode(c, nil)
+				w.set(c, cl)
+				if w.Controll(c) != nil {
+					return
+				}
 			}
 		}
 	}()
-	return h
+	return w
 }
 
 // Client2217 enables Com Port negotiation on a Client.
-func (h *Handler2217) Client2217(c *telnet.Connection) telnet.Negotiator {
-	// log.Println("Client2217")
-	h.client = true
-	m, e := h.me(c)
-	log.Printf("Client2217 %s->%s %v %v\r\n", c.LocalAddr(), c.RemoteAddr(), m, e)
-	return h
+func (w *SerialWorker) Client2217(c *telnet.Connection) telnet.Negotiator {
+	if w.rfc2217 != nil {
+		// Для клиента RFC2217 на сервере свой экземпляр SerialWorker.
+		w, _ = NewSerialWorker(w.context, "", 0)
+	} else {
+		// Чтоб запросить режим
+		w.mode = serial.Mode{}
+	}
+	log.Printf("RFC2217 telnet client %s connected to %s. Mode: %v\r\n", c.LocalAddr(), c.RemoteAddr(), w.get(c).other)
+	return w
 }
 
 // OptionCode returns the IAC code for Com Port.
-func (h *Handler2217) OptionCode() byte {
+func (*SerialWorker) OptionCode() byte {
 	return COMPORT
 }
 
-// Пишет IAC и bs если без ошибки то enable=true
-func (h *Handler2217) IAC(c *telnet.Connection, bs ...byte) (err error) {
+// Пишет iac и bs если без ошибки то клиент активен.
+func (w *SerialWorker) iac(c *telnet.Connection, bs ...byte) (err error) {
 	b := new(bytes.Buffer)
 	b.WriteByte(telnet.IAC)
 	b.Write(bs)
 	_, err = c.Conn.Write(b.Bytes())
+	w.setEnable(c, err == nil)
 	log.Printf("%s->%s IAC %v %v\r\n", c.LocalAddr(), c.RemoteAddr(), bs, err)
-
-	m, _ := h.me(c)
-	h.meSet(c, m, err == nil)
 	return
 }
 
-// Сервер пассивен
-func (h *Handler2217) Offer(c *telnet.Connection) {
-	if !h.client {
+// Сервер пассивен.
+func (w *SerialWorker) Offer(c *telnet.Connection) {
+	if w.rfc2217 != nil {
 		// Сервер не инициирует обмен
 		return
 	}
-	h.IAC(c, telnet.WILL, h.OptionCode())
+	w.iac(c, telnet.WILL, w.OptionCode())
 }
 
 // Сервер ответит если к нему подключена последовательная консоль
-func (h *Handler2217) HandleWill(c *telnet.Connection) {
-	if h.client || len(h.worker.args) > 0 {
-		// Если клиент или интерпретатор команд или команда то не DO
+func (w *SerialWorker) HandleWill(c *telnet.Connection) {
+	if w.rfc2217 == nil {
+		// Если клиент
 		return
 	}
-	h.IAC(c, telnet.DO, h.OptionCode())
-	h.Signature(c)
+	if len(w.args) > 0 {
+		// Если интерпретатор команд или команда то не DO
+		w.iac(c, telnet.DONT, w.OptionCode())
+		w.setEnable(c, true)
+		w.signature(c)
+		w.setEnable(c, false)
+		return
+	}
+	w.iac(c, telnet.DO, w.OptionCode())
+	w.signature(c)
 }
 
 // Заменяем IAC на IAC IAC в writeSignature и writeBaudRate
@@ -159,15 +179,14 @@ func escapeIAC(b []byte) []byte {
 }
 
 // Немного о себе
-func (h *Handler2217) Signature(c *telnet.Connection) (err error) {
-	m, e := h.me(c)
-	if !e {
+func (w *SerialWorker) signature(c *telnet.Connection) (err error) {
+	if !w.enable(c) {
 		return
 	}
 	payload := new(bytes.Buffer)
 	subopt := SIGNATURE
-	s := h.worker.path
-	if h.client {
+	s := w.path
+	if w.rfc2217 == nil {
 		s = c.LocalAddr().String()
 	} else {
 		subopt += SERVER
@@ -175,44 +194,42 @@ func (h *Handler2217) Signature(c *telnet.Connection) (err error) {
 	payload.WriteString(s)
 
 	b := new(bytes.Buffer)
-	b.Write([]byte{telnet.IAC, telnet.SB, h.OptionCode(), subopt})
+	b.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt})
 	b.Write(escapeIAC(payload.Bytes()))
 	b.Write([]byte{telnet.IAC, telnet.SE})
 	_, err = c.Conn.Write(b.Bytes())
+	w.setEnable(c, err == nil)
 	log.Printf("%s Signature %s to %s %v\r\n", c.LocalAddr(), s, c.RemoteAddr(), err)
-	if err != nil {
-		h.meSet(c, m, false)
-	}
 	return
 }
 
-// HandleDo send mode to server
-func (h *Handler2217) HandleDo(c *telnet.Connection) {
-	if !h.client {
+// Запрашиваем режим у сервера
+func (w *SerialWorker) HandleDo(c *telnet.Connection) {
+	if w.rfc2217 != nil {
 		// Сервер не инициирует обмен
 		return
 	}
-	m, _ := h.me(c)
-	h.meSet(c, m, true)
-	h.BaudRate(c)
-	h.DataBits(c)
-	h.Parity(c)
-	h.StopBits(c)
-	h.Controll(c)
+	w.setEnable(c, true)
+	w.baudRate(c) // До первого Controll запрос baudRate
+	w.dataBits(c)
+	w.parity(c)
+	w.stopBits(c)
+	w.Controll(c)
 }
 
-func (h *Handler2217) BaudRate(c *telnet.Connection) (err error) {
-	m, e := h.me(c)
-	if !e {
+// Для нового клиента запрашиваем значение.
+// Иначе устанавливаем w.mode.BaudRate.
+func (w *SerialWorker) baudRate(c *telnet.Connection) (err error) {
+	if !w.enable(c) {
 		return
 	}
-
 	subopt := BAUDRATE
-	v := uint32(m.BaudRate)
-	if h.client {
-		if m.InitialStatusBits != nil {
-			err = h.Signature(c)
-			if err != nil {
+	v := w.mode.BaudRate
+	if w.rfc2217 == nil {
+		// Клиент
+		if w.mode.InitialStatusBits != nil {
+			// Если скорость не запрашивается то представляемся
+			if w.signature(c) != nil {
 				return
 			}
 		} else {
@@ -221,33 +238,33 @@ func (h *Handler2217) BaudRate(c *telnet.Connection) (err error) {
 	} else {
 		subopt += SERVER
 	}
+
 	b := new(bytes.Buffer)
-	b.Write([]byte{telnet.IAC, telnet.SB, h.OptionCode(), subopt})
-	// payload := make([]byte, 4)
-	// binary.BigEndian.PutUint32(payload, uint32(h.will.BaudRate))
+	b.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt})
 	payload := new(bytes.Buffer)
-	binary.Write(payload, binary.BigEndian, v)
+	binary.Write(payload, binary.BigEndian, uint32(v))
 	b.Write(escapeIAC(payload.Bytes()))
 
 	b.Write([]byte{telnet.IAC, telnet.SE})
 	_, err = c.Conn.Write(b.Bytes())
+	w.setEnable(c, err == nil)
 	log.Printf("%s BaudRate %d to %s %v\r\n", c.LocalAddr(), v, c.RemoteAddr(), err)
-	if err != nil {
-		h.meSet(c, m, false)
-	}
 	return
 }
-func (h *Handler2217) DataBits(c *telnet.Connection) (err error) {
-	m, e := h.me(c)
-	if !e {
+
+// Для нового клиента запрашиваем значение.
+// Иначе устанавливаем w.mode.dataBits.
+func (w *SerialWorker) dataBits(c *telnet.Connection) (err error) {
+	if !w.enable(c) {
 		return
 	}
 	subopt := DATASIZE
-	v := byte(m.DataBits)
-	if h.client {
-		if m.InitialStatusBits != nil {
-			err = h.Signature(c)
-			if err != nil {
+	v := w.mode.DataBits
+	if w.rfc2217 == nil {
+		// Клиент
+		if w.mode.InitialStatusBits != nil {
+			// Если скорость не запрашивается то представляемся
+			if w.signature(c) != nil {
 				return
 			}
 		} else {
@@ -256,23 +273,22 @@ func (h *Handler2217) DataBits(c *telnet.Connection) (err error) {
 	} else {
 		subopt += SERVER
 	}
-	_, err = c.Conn.Write([]byte{telnet.IAC, telnet.SB, h.OptionCode(), subopt,
-		v,
+
+	_, err = c.Conn.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt,
+		byte(v),
 		telnet.IAC, telnet.SE})
-	// log.Printf("%s DataBits %d to %s %v\r\n", c.LocalAddr(), val, c.RemoteAddr(), err)
-	if err != nil {
-		h.meSet(c, m, false)
-	}
+	w.setEnable(c, err == nil)
+	log.Printf("%s DataBits %d to %s %v\r\n", c.LocalAddr(), v, c.RemoteAddr(), err)
 	return
 }
-func (h *Handler2217) Parity(c *telnet.Connection) (err error) {
-	m, e := h.me(c)
-	if !e {
+
+func (w *SerialWorker) parity(c *telnet.Connection) (err error) {
+	if !w.enable(c) {
 		return
 	}
 	subopt := PARITY
-	v := byte(0)
-	switch m.Parity {
+	v := w.mode.Parity
+	switch v {
 	case serial.NoParity:
 		v = 1
 	case serial.OddParity:
@@ -284,10 +300,10 @@ func (h *Handler2217) Parity(c *telnet.Connection) (err error) {
 	case serial.SpaceParity:
 		v = 5
 	}
-	if h.client {
-		if m.InitialStatusBits != nil {
-			err = h.Signature(c)
-			if err != nil {
+	if w.rfc2217 == nil {
+		if w.mode.InitialStatusBits != nil {
+			// Если скорость не запрашивается то представляемся
+			if w.signature(c) != nil {
 				return
 			}
 		} else {
@@ -296,23 +312,21 @@ func (h *Handler2217) Parity(c *telnet.Connection) (err error) {
 	} else {
 		subopt += SERVER
 	}
-	_, err = c.Conn.Write([]byte{telnet.IAC, telnet.SB, h.OptionCode(), subopt,
-		v,
+	_, err = c.Conn.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt,
+		byte(v),
 		telnet.IAC, telnet.SE})
-	// log.Printf("%s Parity %d to %s %v\r\n", c.LocalAddr(), val, c.RemoteAddr(), err)
-	if err != nil {
-		h.meSet(c, m, false)
-	}
+	w.setEnable(c, err == nil)
+	log.Printf("%s Parity %d to %s %v\r\n", c.LocalAddr(), v, c.RemoteAddr(), err)
 	return
 }
-func (h *Handler2217) StopBits(c *telnet.Connection) (err error) {
-	m, e := h.me(c)
-	if !e {
+
+func (w *SerialWorker) stopBits(c *telnet.Connection) (err error) {
+	if !w.enable(c) {
 		return
 	}
 	subopt := STOPSIZE
-	v := byte(0)
-	switch m.StopBits {
+	v := w.mode.StopBits
+	switch v {
 	case serial.OneStopBit:
 		v = 1
 	case serial.TwoStopBits:
@@ -320,10 +334,10 @@ func (h *Handler2217) StopBits(c *telnet.Connection) (err error) {
 	case serial.OnePointFiveStopBits:
 		v = 3
 	}
-	if h.client {
-		if m.InitialStatusBits != nil {
-			err = h.Signature(c)
-			if err != nil {
+	if w.rfc2217 == nil {
+		if w.mode.InitialStatusBits != nil {
+			// Если скорость не запрашивается то представляемся
+			if w.signature(c) != nil {
 				return
 			}
 		} else {
@@ -332,111 +346,99 @@ func (h *Handler2217) StopBits(c *telnet.Connection) (err error) {
 	} else {
 		subopt += SERVER
 	}
-	c.Conn.Write([]byte{telnet.IAC, telnet.SB, h.OptionCode(), subopt,
-		v,
+	_, err = c.Conn.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt,
+		byte(v),
 		telnet.IAC, telnet.SE})
-	// log.Printf("%s StopBits %d to %s %v\r\n", c.LocalAddr(), val, c.RemoteAddr(), err)
-	if err != nil {
-		h.meSet(c, m, false)
-	}
+	w.setEnable(c, err == nil)
+	log.Printf("%s StopBits %d to %s %v\r\n", c.LocalAddr(), v, c.RemoteAddr(), err)
 	return
 }
 
 // Принудительно flowControl=N и единожды writeSignature для клиента.
 // Используем для проверки живости.
-func (h *Handler2217) Controll(c *telnet.Connection) (err error) {
-	m, e := h.me(c)
-	if !e {
+func (w *SerialWorker) Controll(c *telnet.Connection) (err error) {
+	cl := w.get(c)
+	if !cl.enable {
 		return
 	}
 	subopt := CONTROL
-	if h.client {
-		if m.InitialStatusBits == nil {
-			m.InitialStatusBits = &serial.ModemOutputBits{}
-			h.meSet(c, m, e)
-			err = h.Signature(c)
-			if err != nil {
+	v := 1 // N
+	if w.rfc2217 == nil {
+		if w.mode.InitialStatusBits == nil {
+			w.mode.InitialStatusBits = &serial.ModemOutputBits{}
+			w.set(c, cl)
+			if w.signature(c) != nil {
 				return
 			}
 		}
 	} else {
 		subopt += SERVER
 	}
-	v := byte(1) // N
-	_, err = c.Conn.Write([]byte{telnet.IAC, telnet.SB, h.OptionCode(), subopt,
-		v,
+	_, err = c.Conn.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt,
+		byte(v),
 		telnet.IAC, telnet.SE})
-	// log.Printf("%s Controll %d to %s %v\r\n", c.LocalAddr(), v, c.RemoteAddr(), err)
-	if err != nil {
-		h.meSet(c, m, false)
-	}
+	w.setEnable(c, err == nil)
+	log.Printf("%s Controll %d to %s %v\r\n", c.LocalAddr(), v, c.RemoteAddr(), err)
 	return
 }
 
 // HandleSB processes the information about Com Port sent from the client to the server and back.
 // Вызывается из read
-func (h *Handler2217) HandleSB(c *telnet.Connection, b []byte) {
-	m, e := h.me(c)
-	if !e {
+func (w *SerialWorker) HandleSB(c *telnet.Connection, b []byte) {
+	cl := w.get(c)
+	if !cl.enable {
 		return
 	}
 	info := fmt.Sprintf("%s->%s IAC SB %v", c.RemoteAddr(), c.LocalAddr(), b)
 
 	subopt := b[0]
-	v := b[1]
+	v := int(b[1])
 
 	switch subopt {
 	case SIGNATURE, SIGNATURE + SERVER:
 		s := string(b[1:])
-		if h.client {
+		if w.rfc2217 == nil {
 			if s == c.LocalAddr().String() {
 				s = "RouterOS"
 			}
-			if h.worker.url == "" {
-				if h.worker.url == s {
-					// return
-				}
-				h.worker.url = s
+			if w.url == "" {
+				w.url = s
 			}
 		} else {
-			if h.worker.remote == s {
-				// return
+			if w.remote == s {
+				return
 			}
 			// У сервера клиентов много.
-			// h.Lock()
-			h.worker.remote = s
-			// h.Unlock()
+			w.clm.Lock()
+			w.remote = s
+			w.clm.Unlock()
 		}
 
 		info += " signature: " + s
 		log.Print(info, "\r\n")
 	case BAUDRATE, BAUDRATE + SERVER:
-		m.BaudRate = int(binary.BigEndian.Uint32(b[1:]))
-		if h.worker.mode.BaudRate == m.BaudRate {
-			// return
-		}
+		v = int(binary.BigEndian.Uint32(b[1:]))
 		info += " baudRate: "
-		if m.BaudRate > 0 {
-			info += fmt.Sprintf("%d", m.BaudRate)
+		if v > 0 {
+			info += fmt.Sprintf("%d", v)
 		} else {
 			info += "?"
 		}
 		log.Print(info, "\r\n")
-		if h.client {
-			h.worker.mode.BaudRate = m.BaudRate
+		cl.other.BaudRate = v
+		if w.rfc2217 == nil {
+			w.set(c, cl)
+			w.mode.BaudRate = cl.other.BaudRate
 			return
 		}
-		if m.BaudRate > 0 {
-			h.worker.SetMode(&m)
-		} else {
-			h.meSet(c, h.worker.mode, e)
+		// Сервер
+		if v > 0 {
+			w.SetMode(&cl.other)
+			return
 		}
-		h.BaudRate(c)
+		// Ответ на запрос о скорости
+		w.baudRate(c)
 	case DATASIZE, DATASIZE + SERVER:
-		m.DataBits = int(v)
-		if h.worker.mode.DataBits == m.DataBits {
-			// return
-		}
 		info += " dataBits: "
 		if v > 0 {
 			info += fmt.Sprintf("%d", v)
@@ -444,117 +446,76 @@ func (h *Handler2217) HandleSB(c *telnet.Connection, b []byte) {
 			info += "?"
 		}
 		log.Print(info, "\r\n")
-		if h.client {
-			h.worker.mode.DataBits = m.DataBits
+		cl.other.DataBits = v
+		if w.rfc2217 == nil {
+			w.set(c, cl)
+			w.mode.DataBits = cl.other.DataBits
 			return
 		}
 		if v > 0 {
-			h.worker.SetMode(&m)
-		} else {
-			h.meSet(c, h.worker.mode, e)
+			w.SetMode(&cl.other)
+			return
 		}
-		h.DataBits(c)
+		w.dataBits(c)
 	case PARITY, PARITY + SERVER:
 		info += " parity: "
 		switch v {
 		case 1:
-			m.Parity = serial.NoParity
+			cl.other.Parity = serial.NoParity
 			info += "N"
 		case 2:
-			m.Parity = serial.OddParity
+			cl.other.Parity = serial.OddParity
 			info += "O"
 		case 3:
-			m.Parity = serial.EvenParity
+			cl.other.Parity = serial.EvenParity
 			info += "E"
 		case 4:
-			m.Parity = serial.MarkParity
+			cl.other.Parity = serial.MarkParity
 			info += "M"
 		case 5:
-			m.Parity = serial.SpaceParity
+			cl.other.Parity = serial.SpaceParity
 			info += "S"
 		default:
 			info += "?"
 		}
-		if h.worker.mode.Parity == m.Parity {
-			// return
-		}
 		log.Print(info, "\r\n")
-		if h.client {
-			h.worker.mode.Parity = m.Parity
+		if w.rfc2217 == nil {
+			w.set(c, cl)
+			w.mode.Parity = cl.other.Parity
 			return
 		}
 		if v > 0 {
-			h.worker.SetMode(&m)
-		} else {
-			h.meSet(c, h.worker.mode, e)
+			w.SetMode(&cl.other)
+			return
 		}
-		h.Parity(c)
+		w.parity(c)
 	case STOPSIZE, STOPSIZE + SERVER:
 		info += " stopBits: "
 		switch v {
 		case 1:
-			m.StopBits = serial.OneStopBit
+			cl.other.StopBits = serial.OneStopBit
 			info += "1"
 		case 2:
-			m.StopBits = serial.TwoStopBits
+			cl.other.StopBits = serial.TwoStopBits
 			info += "2"
 		case 3:
-			m.StopBits = serial.OnePointFiveStopBits
+			cl.other.StopBits = serial.OnePointFiveStopBits
 			info += "1.5"
 		default:
 			info += "?"
 		}
-		if h.worker.mode.StopBits == m.StopBits {
-			// return
-		}
 		log.Print(info, "\r\n")
-		if h.client {
-			h.worker.mode.StopBits = m.StopBits
+		if w.rfc2217 == nil {
+			w.set(c, cl)
+			w.mode.StopBits = cl.other.StopBits
 			return
 		}
 		if v > 0 {
-			h.worker.SetMode(&m)
-		} else {
-			h.meSet(c, h.worker.mode, e)
+			w.SetMode(&cl.other)
+			return
 		}
-		h.StopBits(c)
+		w.stopBits(c)
 	case CONTROL, CONTROL + SERVER:
 		info += " flowControl: N"
-	}
-}
-
-func (h *Handler2217) setMode(c *telnet.Connection, mode *serial.Mode) {
-	m, e := h.me(c)
-	if !e {
-		return
-	}
-	poll := false
-	if mode == nil {
-		mode = &h.worker.mode
-		poll = true
-	}
-
-	ok := false
-	if m.BaudRate != mode.BaudRate {
-		ok = true
-		defer func() { h.BaudRate(c) }()
-	}
-	if m.DataBits != mode.DataBits {
-		ok = true
-		defer func() { h.DataBits(c) }()
-	}
-	if m.Parity != mode.Parity {
-		ok = true
-		defer func() { h.Parity(c) }()
-	}
-	if m.StopBits != mode.StopBits {
-		ok = true
-		defer func() { h.StopBits(c) }()
-	}
-	if ok {
-		if !poll {
-			log.Printf("%s setMode %v to %s\r\n", c.LocalAddr(), *mode, c.RemoteAddr())
-		}
-		h.meSet(c, *mode, e)
 	}
 }
