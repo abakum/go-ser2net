@@ -375,7 +375,6 @@ func (w *SerialWorker) rxWorker() {
 			if n > 0 {
 				w.mux.Lock()
 				for j := 0; j < n; j++ {
-
 					for i := range w.rxJobQueue {
 						w.rxJobQueue[i] <- b[j]
 					}
@@ -617,7 +616,6 @@ func (g *SerialIOWorker) Read(buffer []byte) (n int, err error) {
 				buffer[n] = '\r'
 				n++
 			}
-
 		}
 		if n < len(buffer) {
 			buffer[n] = b
@@ -660,7 +658,6 @@ func (g *SerialIOWorker) Close() (err error) {
 
 // ResizeTerminal implements gotty slave interface
 func (g SerialIOWorker) ResizeTerminal(columns int, rows int) (err error) {
-
 	return
 }
 
@@ -675,7 +672,8 @@ func (g SerialIOWorker) WindowTitleVariables() (titles map[string]interface{}) {
 // New returns a GoTTY slave
 func (w *SerialWorker) New(params map[string][]string, _ map[string][]string) (s server.Slave, err error) {
 	rx := w.Open()
-	s = &SerialIOWorker{w: w,
+	s = &SerialIOWorker{
+		w:  w,
 		rx: rx,
 	}
 
@@ -688,7 +686,8 @@ func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) 
 		if w.connected {
 			// log.Println(w, "in", i*10, "milliseconds\r")
 			rx := w.Open()
-			s = &SerialIOWorker{w: w,
+			s = &SerialIOWorker{
+				w:  w,
 				rx: rx,
 			}
 			w.context, w.cancel = context.WithCancel(w.context)
