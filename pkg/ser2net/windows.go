@@ -18,7 +18,7 @@ func size() (WinSize, error) {
 	var info windows.ConsoleScreenBufferInfo
 	err := windows.GetConsoleScreenBufferInfo(windows.Handle(os.Stdout.Fd()), &info)
 	if err != nil {
-		return WinSize{}, fmt.Errorf("unable to get console info: %w", err)
+		return WinSize{Width: 80, Height: 25}, fmt.Errorf("unable to get console info: %w", err)
 	}
 
 	winsize := WinSize{

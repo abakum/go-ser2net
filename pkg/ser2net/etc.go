@@ -15,7 +15,7 @@ const (
 )
 
 func size() (WinSize, error) {
-	var ws WinSize
+	ws := WinSize{Width: 80, Height: 25}
 	uws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
 	if err != nil {
 		return ws, err

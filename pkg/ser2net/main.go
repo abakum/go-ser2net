@@ -59,8 +59,8 @@ type SerialWorker struct {
 	pid  int
 	// RFC 2217
 	rfc2217 *telnet.Server
-	clm     sync.Mutex
 	cls     map[string]Client
+	clm     sync.Mutex // Для cls
 	remote  string
 }
 
@@ -161,13 +161,13 @@ func (w *SerialWorker) String() string {
 	if w.like != nil {
 		if len(w.args) > 0 {
 			if w.pid > 0 {
-				return fmt.Sprintf("%s%d",
+				return fmt.Sprintf("$%s%d",
 					path, w.pid)
 			}
-			return fmt.Sprintf("%s %s",
+			return fmt.Sprintf("$%s %s",
 				path, connected)
 		}
-		if !LastDigit(w.url) && w.url != "" {
+		if strings.Contains(connected, "$") {
 			return fmt.Sprintf("telnet://%s %s",
 				LocalPort(w.path), connected)
 		}
@@ -195,37 +195,37 @@ func (w *SerialWorker) Stop() {
 }
 
 func (w *SerialWorker) SetMode(mode *serial.Mode) (err error) {
-	log.Printf("SetMode %+v %+v\r\n", *mode, w.cls)
+	// log.Printf("SetMode %+v %+v\r\n", *mode, w.cls)
 	err = w.serialConn.SetMode(mode)
 	if err == nil && len(w.args) == 0 {
 		w.mode = *mode
-		// Рассылает изменения mode всем.
+		// Рассылает всем изменения mode.
 		for _, cl := range w.cls {
 			if !cl.enable {
 				continue
 			}
 			ok := false
-			if cl.other.BaudRate != mode.BaudRate {
+			if cl.remote.BaudRate != mode.BaudRate {
 				if w.baudRate(cl.c) == nil {
-					cl.other.BaudRate = mode.BaudRate
+					cl.remote.BaudRate = mode.BaudRate
 					ok = true
 				}
 			}
-			if cl.other.DataBits != mode.DataBits {
+			if cl.remote.DataBits != mode.DataBits {
 				if w.dataBits(cl.c) == nil {
-					cl.other.DataBits = mode.DataBits
+					cl.remote.DataBits = mode.DataBits
 					ok = true
 				}
 			}
-			if cl.other.Parity != mode.Parity {
+			if cl.remote.Parity != mode.Parity {
 				if w.parity(cl.c) == nil {
-					cl.other.Parity = mode.Parity
+					cl.remote.Parity = mode.Parity
 					ok = true
 				}
 			}
-			if cl.other.StopBits != mode.StopBits {
+			if cl.remote.StopBits != mode.StopBits {
 				if w.stopBits(cl.c) == nil {
-					cl.other.StopBits = mode.StopBits
+					cl.remote.StopBits = mode.StopBits
 					ok = true
 				}
 			}
@@ -846,21 +846,19 @@ func BaudRate(b int, err error) (baud int) {
 }
 
 type likeSerialPort struct {
-	console console.Console
-	closed  bool
-	conn    *telnet.Connection
+	closed bool
+	conn   *telnet.Connection
+	// Интерпретатор команд или команда
 	command bool
+	console console.Console
+	ws      WinSize
 }
 
 func openLike(w *SerialWorker) (port serial.Port, l *likeSerialPort, err error) {
 	l = &likeSerialPort{}
 	l.command = len(w.args) > 0
 	if l.command {
-		ws, err := size()
-		if err != nil {
-			ws.Width = 80
-			ws.Height = 25
-		}
+		ws, _ := size()
 		l.console, err = console.New(int(ws.Width), int(ws.Height))
 		// log.Println(l, err)
 		if err != nil {
@@ -873,7 +871,11 @@ func openLike(w *SerialWorker) (port serial.Port, l *likeSerialPort, err error) 
 		w.pid, _ = l.console.Pid()
 		return l, l, err
 	}
-	l.conn, err = telnet.Dial(w.path, options.NAWSOption, w.Client2217)
+	if len(w.args) > 0 {
+		l.conn, err = telnet.Dial(w.path, w.like.Client1073)
+	} else {
+		l.conn, err = telnet.Dial(w.path, w.Client2217)
+	}
 
 	if err != nil {
 		return nil, nil, err
