@@ -21,6 +21,7 @@ import (
 	"github.com/abakum/go-console"
 	"github.com/sorenisanerd/gotty/server"
 	"github.com/sorenisanerd/gotty/utils"
+	"github.com/xlab/closer"
 	"go.bug.st/serial"
 )
 
@@ -50,14 +51,15 @@ type SerialWorker struct {
 
 	context  context.Context
 	cancel   context.CancelFunc
-	web      *server.Server
+	web      *server.Server // -88
 	url      string
 	quitting bool
-	// Shell & command
+	// -H:2322 -Hcmd
 	like *likeSerialPort
+	// -Hcmd
 	args []string
 	pid  int
-	// RFC 2217
+	// -22
 	rfc2217 *telnet.Server
 	cls     map[string]Client
 	clm     sync.Mutex // Для cls
@@ -171,8 +173,10 @@ func (w *SerialWorker) String() string {
 			return fmt.Sprintf("telnet://%s %s",
 				LocalPort(w.path), connected)
 		}
-		return fmt.Sprintf("telnet://%s %s@%s",
-			LocalPort(w.path), connected, Mode{w.mode, ""})
+		if strings.Contains(w.path, ":") {
+			return fmt.Sprintf("telnet://%s %s@%s",
+				LocalPort(w.path), connected, Mode{w.mode, ""})
+		}
 	}
 	if w.remote != "" {
 		connected += " from " + w.remote
@@ -185,6 +189,8 @@ func (w *SerialWorker) String() string {
 // Останавливает сервер w.web через w.cancel().
 // Останавливает последовательный порт w.cancel().
 func (w *SerialWorker) Stop() {
+	// log.Printf("SerialWorker.Stop %s %v %v %v\r\n", w.url, w.connected, w.cancel, w.rfc2217)
+
 	w.url = ""
 	if w.cancel != nil {
 		w.cancel()
@@ -242,8 +248,18 @@ func (w *SerialWorker) Mode() serial.Mode {
 }
 
 func (w *SerialWorker) SerialClose() error {
+	if !w.connected {
+		return nil
+	}
 	w.connected = false
-	return SerialClose(w.serialConn)
+	// log.Println("SerialWorker.SerialClose")
+	if w.like != nil {
+		return w.like.Close()
+	}
+	if w.serialConn != nil {
+		return SerialClose(w.serialConn)
+	}
+	return nil
 }
 
 // Когда ждать connectSerial не хорошо
@@ -263,6 +279,7 @@ func (w *SerialWorker) connectSerial() {
 	}
 	// log.Println("connectSerial...")
 	if len(w.args) > 0 || !SerialPath(w.path) {
+		// -Hcmd -H:2323
 		if w.like != nil {
 			w.connected = true
 			return
@@ -310,14 +327,16 @@ func (w *SerialWorker) txWorker() {
 			if w.connected {
 				_, err := w.serialConn.Write([]byte{job})
 				if err != nil {
-					w.connected = false
+					// w.connected = false
 
 					porterr, ok := err.(serial.PortError)
 					if ok {
 						log.Printf("ERR: Writing failed %s\r\n", porterr.EncodedErrorString())
 						w.lastErr = porterr.EncodedErrorString()
 					}
+					// log.Printf("txWorker w.SerialClose")
 					w.SerialClose()
+					// w.Stop()
 				}
 			} else if job == '\n' {
 				err := fmt.Sprintf("Error: %s\n", w.lastErr)
@@ -374,11 +393,12 @@ func (w *SerialWorker) rxWorker() {
 					}
 					if err == io.EOF || strings.Contains(err.Error(), "/dev/ptmx:") {
 						log.Printf("%v\r\n", err)
-						w.Stop()
+						time.AfterFunc(time.Second, closer.Close)
+						// w.Stop()
 					} else {
 						log.Printf("error reading from serial: %v\r\n", err)
 					}
-					w.connected = false
+					// w.connected = false
 
 					porterr, ok := err.(serial.PortError)
 					if ok {
@@ -386,7 +406,9 @@ func (w *SerialWorker) rxWorker() {
 						w.lastErr = porterr.EncodedErrorString()
 					}
 				}
+				// log.Printf("rxWorker w.SerialClose")
 				w.SerialClose()
+				// w.Stop()
 				return
 			}
 		}
@@ -426,10 +448,11 @@ func (w *SerialWorker) Worker() {
 				}
 			}
 		}
+		// log.Printf("Worker w.SerialClose")
 		w.SerialClose()
 	}
 	// log.Println("...Worker")
-	w.Stop()
+	// w.Stop()
 }
 
 // Serve is invoked by an external entity to provide a Reader and Writer interface
@@ -722,6 +745,7 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string, qu
 	w.context, w.cancel = context.WithCancel(w.context)
 	w.url = fmt.Sprintf("http://%s", net.JoinHostPort(appOptions.Address, appOptions.Port))
 	err = srv.Run(w.context)
+	// log.Printf("StartGoTTY w.Stop")
 	w.Stop()
 	w.web = nil
 
@@ -740,11 +764,15 @@ func (w *SerialWorker) StartTelnet(bindHostname string, port int) (err error) {
 		return
 	}
 	w.context, w.cancel = context.WithCancel(w.context)
-
-	w.rfc2217 = telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption, options.NAWSOption, w.Server2217)
+	Server := w.Server2217
+	if len(w.args) > 0 {
+		Server = w.Server1073
+	}
+	w.rfc2217 = telnet.NewServer(fmt.Sprintf("%s:%d", bindHostname, port), w, options.EchoOption, options.SuppressGoAheadOption, options.BinaryTransmissionOption, w.Server727, Server)
 	w.url = "telnet://" + w.rfc2217.Address
 	err = w.rfc2217.ListenAndServe()
 	w.rfc2217 = nil
+	// log.Printf("StartTelnet w.Stop")
 	w.Stop()
 
 	if err != nil {
@@ -782,6 +810,7 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 	if path == "" {
 		w.mode = serial.Mode{}
 		w.cls = make(map[string]Client)
+		w.context = context
 		return &w, nil
 	}
 	w.txJobQueue = make(chan byte, K4)
@@ -847,8 +876,9 @@ func BaudRate(b int, err error) (baud int) {
 
 type likeSerialPort struct {
 	closed bool
-	conn   *telnet.Connection
-	// Интерпретатор команд или команда
+	// -H:2323
+	conn *telnet.Connection
+	// -Hcmd
 	command bool
 	console console.Console
 	ws      WinSize
@@ -858,6 +888,7 @@ func openLike(w *SerialWorker) (port serial.Port, l *likeSerialPort, err error) 
 	l = &likeSerialPort{}
 	l.command = len(w.args) > 0
 	if l.command {
+		// -Hcmd -Hbash
 		ws, _ := size()
 		l.console, err = console.New(int(ws.Width), int(ws.Height))
 		// log.Println(l, err)
@@ -871,11 +902,8 @@ func openLike(w *SerialWorker) (port serial.Port, l *likeSerialPort, err error) 
 		w.pid, _ = l.console.Pid()
 		return l, l, err
 	}
-	if len(w.args) > 0 {
-		l.conn, err = telnet.Dial(w.path, w.like.Client1073)
-	} else {
-		l.conn, err = telnet.Dial(w.path, w.Client2217)
-	}
+	// -H:2323
+	l.conn, err = telnet.Dial(w.path, w.Client727, w.Client1073, w.Client2217)
 
 	if err != nil {
 		return nil, nil, err
@@ -887,24 +915,29 @@ func (likeSerialPort) Break(time.Duration) error {
 	return nil
 }
 func (l *likeSerialPort) Close() error {
-	if l.command {
-		if l.console == nil {
-			return nil
-		}
-		if l.closed {
-			return nil
-		}
-		l.closed = true
-		return l.console.Close()
-	}
-	if l.conn == nil {
-		return nil
-	}
 	if l.closed {
 		return nil
 	}
 	l.closed = true
-	return l.conn.Close()
+	// log.Println("likeSerialPort.Close")
+
+	if l.command {
+		if l.console == nil {
+			// log.Println("l.console == nil")
+			return nil
+		}
+		err := l.console.Close()
+		// log.Println("l.console.Close")
+		return err
+	}
+	if l.conn == nil {
+		// log.Println("l.conn == nil")
+		return nil
+	}
+	IAC(l.conn, telnet.DO, telnet.TeloptLOGOUT)
+	err := l.conn.Close()
+	// log.Println("l.conn.Close")
+	return err
 }
 
 func (likeSerialPort) Drain() error {

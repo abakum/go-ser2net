@@ -14,10 +14,12 @@ import (
 )
 
 const (
-	COMPORT byte = 0x2C
-	SERVER  byte = 100
-	ALIVE        = time.Minute
+	COMPORT    byte = 0x2C
+	SERVER     byte = 100
+	ALIVE           = time.Minute
+	MUTELOGOUT      = true
 	// ALIVE = time.Second * 15 // Тест.
+	// MUTELOGOUT = false
 )
 const (
 	SIGNATURE byte = iota
@@ -28,139 +30,47 @@ const (
 	CONTROL
 )
 
-func cmdOpt(b byte) string {
-	switch b {
-	case telnet.WILL:
-		return "WILL"
-	case telnet.WONT:
-		return "WONT"
-	case telnet.DO:
-		return "DO"
-	case telnet.DONT:
-		return "DONT"
-	case COMPORT:
-		return "COMPORT"
-	case SIGNATURE, SIGNATURE + SERVER:
-		return "Signature"
-	case BAUDRATE, BAUDRATE + SERVER:
-		return "BaudRate"
-	case DATASIZE, DATASIZE + SERVER:
-		return "DataBits"
-	case PARITY, PARITY + SERVER:
-		return "Parity"
-	case STOPSIZE, STOPSIZE + SERVER:
-		return "StopBits"
-	case CONTROL, CONTROL + SERVER:
-		return "FlowControl"
-	}
-	return "NAWS"
-}
-
 // Клиент.
 type Client struct {
 	c      *telnet.Connection
 	remote serial.Mode
 	enable bool
 	last   time.Time
-}
-
-// Переключает клиента.
-func (w *SerialWorker) setEnable(c *telnet.Connection, b bool) {
-	cl := w.get(c)
-	if cl.enable == b {
-		return
-	}
-	cl.enable = b
-	w.set(c, cl)
-}
-
-// Включен ли клиент.
-func (w *SerialWorker) enable(c *telnet.Connection) bool {
-	return w.get(c).enable
-}
-
-// Возвращает данные клиента и создаёт его если не было
-func (w *SerialWorker) get(c *telnet.Connection) (cl Client) {
-	s := c.RemoteAddr().String()
-	cl, ok := w.cls[s]
-	if ok {
-		return
-	}
-	cl = Client{
-		remote: w.mode,
-		c:      c,
-	}
-	w.set(c, cl)
-	return
-}
-
-// Обновляет или добавляет данные о клиенте
-func (w *SerialWorker) set(c *telnet.Connection, cl Client) {
-	s := c.RemoteAddr().String()
-	cl.last = time.Now()
-	w.clm.Lock()
-	w.cls[s] = cl
-	w.clm.Unlock()
-}
-
-// Удаляет клиента
-func (w *SerialWorker) meDel(c *telnet.Connection) {
-	s := c.RemoteAddr().String()
-	w.clm.Lock()
-	delete(w.cls, s)
-	w.clm.Unlock()
+	done   chan bool
 }
 
 // Server2217 enables Com Port negotiation on a Server.
-// Добавляет клиента в h.cons при подключении.
-// Убирает клиента из h.cons когда соединение с ним прекращается.
 func (w *SerialWorker) Server2217(c *telnet.Connection) telnet.Negotiator {
-	if len(w.args) > 0 {
-		return w
-	}
-	log.Printf("RFC2217 telnet server %s accepted connection from %s. Mode: %v\r\n", c.LocalAddr(), c.RemoteAddr(), w.mode)
+	log.Printf("Telnet server %s accepted connection from %s. Mode: %v\r\n", c.LocalAddr(), c.RemoteAddr(), w.mode)
+	cl := w.get(c) // Как сервер представляет клиента
+	cl.done = make(chan bool)
+	w.set(c, cl)
 	go func() {
-		defer func() {
-			w.meDel(c)
-			log.Printf("RFC2217 telnet client %s is disconnected\r\n", c.RemoteAddr())
-		}()
-		for {
-			if w == nil {
-				return
-			}
-			select {
-			case <-w.context.Done():
-				if w.enable(c) {
-					w.iac(c, telnet.DONT, w.OptionCode())
-				}
-				return
-			case <-time.After(ALIVE):
-				cl := w.get(c)
-				if !cl.enable {
-					return
-				}
-				if time.Since(cl.last) < ALIVE-time.Second {
-					continue
-				}
-				if w.spam(c, "") != nil {
-					return
-				}
-			}
+		select {
+		case <-cl.done:
+			// log.Printf("Server2217 done\r\n")
+			log.Printf("Telnet client %s is disconnected\r\n", c.RemoteAddr())
+		case <-w.context.Done():
+			// log.Printf("Server2217 Done\r\n")
+			log.Printf("Telnet client %s is disconnected by server\r\n", c.RemoteAddr())
 		}
+		w.del(c)
+		c.Close()
 	}()
 	return w
 }
 
 // Client2217 enables Com Port negotiation on a Client.
+// Добавляет клиента в w.cls при подключении через w.get(c).remote.
 func (w *SerialWorker) Client2217(c *telnet.Connection) telnet.Negotiator {
 	if w.rfc2217 != nil {
 		// Для клиента RFC2217 на сервере свой экземпляр SerialWorker.
 		w, _ = NewSerialWorker(w.context, "", 0)
 	} else {
-		// Чтоб запросить режим
+		// Чтоб запросить режим.
 		w.mode = serial.Mode{}
 	}
-	log.Printf("RFC2217 telnet client %s connected to %s. Mode: %v\r\n", c.LocalAddr(), c.RemoteAddr(), w.get(c).remote)
+	log.Printf("Telnet client %s connected to %s. Mode: %v\r\n", c.LocalAddr(), c.RemoteAddr(), w.get(c).remote)
 	return w
 }
 
@@ -169,95 +79,187 @@ func (*SerialWorker) OptionCode() byte {
 	return COMPORT
 }
 
-// Пишет iac и bs если без ошибки то клиент активен.
-func (w *SerialWorker) iac(c *telnet.Connection, v ...byte) (err error) {
-	b := new(bytes.Buffer)
-	b.WriteByte(telnet.IAC)
-	b.Write(v)
-	_, err = c.Conn.Write(b.Bytes())
-	w.setEnable(c, err == nil)
-	log.Printf("%s->%s IAC %v %v %s\r\n", c.LocalAddr(), c.RemoteAddr(), v, err, cmdOpt(v[0]))
-	return
-}
-
 // Сервер пассивен.
 func (w *SerialWorker) Offer(c *telnet.Connection) {
-	if w.rfc2217 != nil {
-		// Сервер не инициирует обмен
-		return
+	if w.rfc2217 == nil {
+		// Клиент.
+		w.iac(c, telnet.WILL, w.OptionCode())
 	}
-	w.iac(c, telnet.WILL, w.OptionCode())
 }
 
-// Сервер ответит если к нему подключена последовательная консоль
+// Сервер шлёт подпись и мониторит отключени клиентов.
 func (w *SerialWorker) HandleWill(c *telnet.Connection) {
-	log.Printf("%s->%s IAC %v %s\r\n", c.RemoteAddr(), c.LocalAddr(), []byte{telnet.WILL, w.OptionCode()}, cmdOpt(telnet.WILL))
+	handle(c, telnet.WILL, w.OptionCode())
 	if w.rfc2217 == nil {
-		// Если клиент
-		return
-	}
-	if len(w.args) > 0 {
-		// Если интерпретатор команд или команда
-		w.iac(c, telnet.DONT, w.OptionCode())
-		w.spam(c, "$"+w.path)
-		w.setEnable(c, false)
+		// Клиент.
 		return
 	}
 	w.iac(c, telnet.DO, w.OptionCode())
 	w.signature(c)
+	go w.alive(c)
 }
 
-// Заменяем IAC на IAC IAC в writeSignature и writeBaudRate
-func escapeIAC(b []byte) []byte {
-	return bytes.ReplaceAll(b, []byte{telnet.IAC}, []byte{telnet.IAC, telnet.IAC})
-}
-
-// Немного о себе
-func (w *SerialWorker) signature(c *telnet.Connection) (err error) {
-	if !w.enable(c) {
-		return
-	}
-	return w.spam(c, w.path)
-}
-
-// Для проверки живости.
-func (w *SerialWorker) spam(c *telnet.Connection, v string) (err error) {
-	subopt := SIGNATURE
-	if w.rfc2217 == nil {
-		v = c.LocalAddr().String()
-	} else {
-		subopt += SERVER
-	}
-
-	b := new(bytes.Buffer)
-	b.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt})
-	if len(v) > 0 {
-		payload := new(bytes.Buffer)
-		payload.WriteString(v)
-		b.Write(escapeIAC(payload.Bytes()))
-	}
-	b.Write([]byte{telnet.IAC, telnet.SE})
-	_, err = c.Conn.Write(b.Bytes())
-	w.setEnable(c, err == nil)
-	if len(v) > 0 {
-		// Нет спаму.
-		log.Printf("%s->%s Signature %v %v\r\n", c.LocalAddr(), c.RemoteAddr(), v, err)
-	}
-	return
-}
-
-// Запрашиваем режим у сервера
+// Клиент запрашивает режим у сервера.
 func (w *SerialWorker) HandleDo(c *telnet.Connection) {
-	log.Printf("%s->%s IAC %v %s\r\n", c.RemoteAddr(), c.LocalAddr(), []byte{telnet.DO, w.OptionCode()}, cmdOpt(telnet.DO))
+	handle(c, telnet.DO, w.OptionCode())
 	if w.rfc2217 != nil {
 		// Сервер не инициирует обмен
 		return
 	}
-	w.baudRate(c) // Без представления.
+	// Без представления.
+	w.baudRate(c)
 	w.dataBits(c)
 	w.parity(c)
 	w.stopBits(c)
-	w.control(c) // Представляемся
+	// Представляемся
+	w.control(c)
+}
+
+// HandleSB processes the information about Com Port sent from the client to the server and back.
+// Вызывается из read
+func (w *SerialWorker) HandleSB(c *telnet.Connection, b []byte) {
+	if len(b) < 2 {
+		// Спам.
+		return
+	}
+	cl := w.get(c)
+	if !cl.enable {
+		return
+	}
+
+	client := w.rfc2217 == nil
+	subopt := b[0]
+	v := int(b[1])
+
+	info := fmt.Sprintf("%s<=%s IAC SB %v %s ", c.LocalAddr(), c.RemoteAddr(), b, cmdOpt(subopt))
+
+	switch subopt {
+	case SIGNATURE, SIGNATURE + SERVER:
+		s := string(b[1:])
+		if client {
+			// RouterOS возвращает подпись клиента.
+			// ser2net представляется как ser2net.
+			if s == c.LocalAddr().String() {
+				s = "RouterOS"
+			}
+			// Запомним первое представление.
+			if w.url == "" {
+				w.url = s
+			}
+		} else {
+			if w.remote == s {
+				return
+			}
+			// У сервера клиентов много.
+			w.clm.Lock()
+			w.remote = s
+			w.clm.Unlock()
+		}
+
+		info += s
+		log.Print(info, "\r\n")
+	case BAUDRATE, BAUDRATE + SERVER:
+		v = int(binary.BigEndian.Uint32(b[1:]))
+		if v > 0 {
+			info += fmt.Sprintf("%d", v)
+		} else {
+			info += "?"
+		}
+		log.Print(info, "\r\n")
+		cl.remote.BaudRate = v
+		if client {
+			w.set(c, cl)
+			w.mode.BaudRate = cl.remote.BaudRate
+			return
+		}
+		// Сервер
+		if v > 0 {
+			w.SetMode(&cl.remote)
+			return
+		}
+		// Ответ на запрос о скорости
+		w.baudRate(c)
+	case DATASIZE, DATASIZE + SERVER:
+		if v > 0 {
+			info += fmt.Sprintf("%d", v)
+		} else {
+			info += "?"
+		}
+		log.Print(info, "\r\n")
+		cl.remote.DataBits = v
+		if client {
+			w.set(c, cl)
+			w.mode.DataBits = cl.remote.DataBits
+			return
+		}
+		if v > 0 {
+			w.SetMode(&cl.remote)
+			return
+		}
+		w.dataBits(c)
+	case PARITY, PARITY + SERVER:
+		switch v {
+		case 1:
+			cl.remote.Parity = serial.NoParity
+			info += "N"
+		case 2:
+			cl.remote.Parity = serial.OddParity
+			info += "O"
+		case 3:
+			cl.remote.Parity = serial.EvenParity
+			info += "E"
+		case 4:
+			cl.remote.Parity = serial.MarkParity
+			info += "M"
+		case 5:
+			cl.remote.Parity = serial.SpaceParity
+			info += "S"
+		default:
+			info += "?"
+		}
+		log.Print(info, "\r\n")
+		if client {
+			w.set(c, cl)
+			w.mode.Parity = cl.remote.Parity
+			return
+		}
+		if v > 0 {
+			w.SetMode(&cl.remote)
+			return
+		}
+		w.parity(c)
+	case STOPSIZE, STOPSIZE + SERVER:
+		switch v {
+		case 1:
+			cl.remote.StopBits = serial.OneStopBit
+			info += "1"
+		case 2:
+			cl.remote.StopBits = serial.TwoStopBits
+			info += "2"
+		case 3:
+			cl.remote.StopBits = serial.OnePointFiveStopBits
+			info += "1.5"
+		default:
+			info += "?"
+		}
+		log.Print(info, "\r\n")
+		if client {
+			w.set(c, cl)
+			w.mode.StopBits = cl.remote.StopBits
+			return
+		}
+		if v > 0 {
+			w.SetMode(&cl.remote)
+			return
+		}
+		w.stopBits(c)
+	case CONTROL, CONTROL + SERVER:
+		info += "N"
+		log.Print(info, "\r\n")
+		if !client {
+			w.control(c)
+		}
+	}
 }
 
 // Для нового клиента запрашиваем значение.
@@ -289,9 +291,9 @@ func (w *SerialWorker) baudRate(c *telnet.Connection) (err error) {
 	b.Write(escapeIAC(payload.Bytes()))
 
 	b.Write([]byte{telnet.IAC, telnet.SE})
+	log.Printf("%s->%s %s %d\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(subopt), v)
 	_, err = c.Conn.Write(b.Bytes())
 	w.setEnable(c, err == nil)
-	log.Printf("%s->%s %s %d %v\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(subopt), v, err)
 	return
 }
 
@@ -317,11 +319,13 @@ func (w *SerialWorker) dataBits(c *telnet.Connection) (err error) {
 		subopt += SERVER
 	}
 
-	_, err = c.Conn.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt,
+	b := new(bytes.Buffer)
+	b.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt,
 		byte(v),
 		telnet.IAC, telnet.SE})
+	log.Printf("%s->%s %s %d\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(subopt), v)
+	_, err = c.Conn.Write(b.Bytes())
 	w.setEnable(c, err == nil)
-	log.Printf("%s->%s %s %d %v\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(subopt), v, err)
 	return
 }
 
@@ -355,11 +359,14 @@ func (w *SerialWorker) parity(c *telnet.Connection) (err error) {
 	} else {
 		subopt += SERVER
 	}
-	_, err = c.Conn.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt,
+
+	b := new(bytes.Buffer)
+	b.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt,
 		byte(v),
 		telnet.IAC, telnet.SE})
+	log.Printf("%s->%s %s %d\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(subopt), v)
+	_, err = c.Conn.Write(b.Bytes())
 	w.setEnable(c, err == nil)
-	log.Printf("%s->%s %s %d %v\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(subopt), v, err)
 	return
 }
 
@@ -389,11 +396,13 @@ func (w *SerialWorker) stopBits(c *telnet.Connection) (err error) {
 	} else {
 		subopt += SERVER
 	}
-	_, err = c.Conn.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt,
+	b := new(bytes.Buffer)
+	b.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt,
 		byte(v),
 		telnet.IAC, telnet.SE})
+	log.Printf("%s->%s %s %d\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(subopt), v)
+	_, err = c.Conn.Write(b.Bytes())
 	w.setEnable(c, err == nil)
-	log.Printf("%s->%s %s %d %v\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(subopt), v, err)
 	return
 }
 
@@ -407,7 +416,8 @@ func (w *SerialWorker) control(c *telnet.Connection) (err error) {
 	v := 1 // N
 	if w.rfc2217 == nil {
 		if w.mode.InitialStatusBits == nil {
-			w.mode.InitialStatusBits = &serial.ModemOutputBits{} // Чтоб представлялись при смене режима
+			// Чтоб представлялись при смене режима.
+			w.mode.InitialStatusBits = &serial.ModemOutputBits{}
 			w.set(c, cl)
 			if w.signature(c) != nil {
 				return
@@ -416,147 +426,212 @@ func (w *SerialWorker) control(c *telnet.Connection) (err error) {
 	} else {
 		subopt += SERVER
 	}
-	_, err = c.Conn.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt,
+	b := new(bytes.Buffer)
+	b.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), subopt,
 		byte(v),
 		telnet.IAC, telnet.SE})
+	log.Printf("%s->%s %s %d\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(subopt), v)
+	_, err = c.Conn.Write(b.Bytes())
 	w.setEnable(c, err == nil)
-	log.Printf("%s->%s %s %d %v\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(subopt), v, err)
 	return
 }
 
-// HandleSB processes the information about Com Port sent from the client to the server and back.
-// Вызывается из read
-func (w *SerialWorker) HandleSB(c *telnet.Connection, b []byte) {
-	if len(b) < 2 {
-		// Спам.
-		return
-	}
+// Переключает клиента.
+func (w *SerialWorker) setEnable(c *telnet.Connection, b bool) {
 	cl := w.get(c)
-	if !cl.enable {
+	if cl.enable == b {
 		return
 	}
+	cl.enable = b
+	w.set(c, cl)
+}
 
-	subopt := b[0]
-	v := int(b[1])
+// Включен ли клиент.
+func (w *SerialWorker) enable(c *telnet.Connection) bool {
+	return w.get(c).enable
+}
 
-	info := fmt.Sprintf("%s->%s IAC SB %v %s ", c.RemoteAddr(), c.LocalAddr(), b, cmdOpt(subopt))
-	defer func() {
-		log.Print(info, "\r\n")
-	}()
+// Есть ли.
+func (w *SerialWorker) exist(c *telnet.Connection) (ok bool) {
+	_, ok = w.cls[c.RemoteAddr().String()]
+	return
+}
 
-	switch subopt {
+// Возвращает данные клиента и создаёт его если не было.
+func (w *SerialWorker) get(c *telnet.Connection) (cl Client) {
+	s := c.RemoteAddr().String()
+	cl, ok := w.cls[s]
+	if ok {
+		return
+	}
+	cl = Client{
+		remote: w.mode,
+		c:      c,
+	}
+	w.set(c, cl)
+	return
+}
+
+// Обновляет или добавляет данные о клиенте.
+func (w *SerialWorker) set(c *telnet.Connection, cl Client) {
+	s := c.RemoteAddr().String()
+	cl.last = time.Now()
+	w.clm.Lock()
+	w.cls[s] = cl
+	w.clm.Unlock()
+}
+
+// Удаляет клиента
+func (w *SerialWorker) del(c *telnet.Connection) {
+	s := c.RemoteAddr().String()
+	w.clm.Lock()
+	delete(w.cls, s)
+	w.clm.Unlock()
+}
+
+// Для протокола.
+func cmdOpt(b byte) string {
+	switch b {
+	case telnet.WILL:
+		return "WILL"
+	case telnet.WONT:
+		return "WONT"
+	case telnet.DO:
+		return "DO"
+	case telnet.DONT:
+		return "DONT"
+	case COMPORT:
+		return "ComPort"
+	case telnet.TeloptLOGOUT:
+		return "LogOut"
+	case telnet.TeloptNAWS:
+		return "NAWS"
 	case SIGNATURE, SIGNATURE + SERVER:
-		s := string(b[1:])
-		if w.rfc2217 == nil {
-			if s == c.LocalAddr().String() {
-				s = "RouterOS"
-			}
-			if w.url == "" {
-				w.url = s
-			}
-		} else {
-			if w.remote == s {
+		return "Signature"
+	case BAUDRATE, BAUDRATE + SERVER:
+		return "BaudRate"
+	case DATASIZE, DATASIZE + SERVER:
+		return "DataBits"
+	case PARITY, PARITY + SERVER:
+		return "Parity"
+	case STOPSIZE, STOPSIZE + SERVER:
+		return "StopBits"
+	case CONTROL, CONTROL + SERVER:
+		return "FlowControl"
+	}
+	return "?"
+}
+
+// Посылаем IAC и bs.
+func IAC(c *telnet.Connection, v ...byte) (err error) {
+	_, err = c.Conn.Write(iac(c, v...))
+	// log.Printf("%s->%s IAC err: %v\r\n", c.LocalAddr(), c.RemoteAddr(), err)
+	return
+}
+
+// Протокол посылки данных.
+func iac(c *telnet.Connection, v ...byte) []byte {
+	b := new(bytes.Buffer)
+	b.WriteByte(telnet.IAC)
+	if len(v) > 0 {
+		b.Write(v)
+	}
+	opt := ""
+	if len(v) > 1 {
+		opt = cmdOpt(v[1])
+		if MUTELOGOUT && v[1] == telnet.TeloptLOGOUT {
+			return b.Bytes()
+		}
+	}
+	log.Printf("%s->%s IAC %v %s %s\r\n", c.LocalAddr(), c.RemoteAddr(), v, cmdOpt(v[0]), opt)
+	return b.Bytes()
+}
+
+// Протокол получения данных.
+func handle(c *telnet.Connection, v ...byte) {
+	opt := ""
+	if len(v) > 1 {
+		opt = cmdOpt(v[1])
+		if MUTELOGOUT && v[1] == telnet.TeloptLOGOUT {
+			return
+		}
+	}
+	log.Printf("%s<=%s IAC %v %s %s\r\n", c.LocalAddr(), c.RemoteAddr(), v, cmdOpt(v[0]), opt)
+}
+
+// Пишет iac и bs если ошибка то клиента отключаем.
+func (w *SerialWorker) iac(c *telnet.Connection, v ...byte) (err error) {
+	err = IAC(c, v...)
+	w.setEnable(c, err == nil)
+	return
+}
+
+// Убирает клиента  без RFC727 из w.cls когда соединение с ним прекращается.
+func (w *SerialWorker) alive(c *telnet.Connection) {
+	for {
+		if w == nil {
+			return
+		}
+		select {
+		case <-w.context.Done():
+			return
+		case <-time.After(ALIVE):
+			if !w.exist(c) {
 				return
 			}
-			// У сервера клиентов много.
-			w.clm.Lock()
-			w.remote = s
-			w.clm.Unlock()
-		}
+			cl := w.get(c)
+			if !cl.enable {
+				return
+			}
+			if time.Since(cl.last) < ALIVE-time.Second {
+				continue
+			}
 
-		info += s
-	case BAUDRATE, BAUDRATE + SERVER:
-		v = int(binary.BigEndian.Uint32(b[1:]))
-		if v > 0 {
-			info += fmt.Sprintf("%d", v)
-		} else {
-			info += "?"
+			if IAC(c, telnet.WILL, telnet.TeloptLOGOUT) != nil {
+				cl.done <- true
+				return
+			}
 		}
-		cl.remote.BaudRate = v
-		if w.rfc2217 == nil {
-			w.set(c, cl)
-			w.mode.BaudRate = cl.remote.BaudRate
-			return
-		}
-		// Сервер
-		if v > 0 {
-			w.SetMode(&cl.remote)
-			return
-		}
-		// Ответ на запрос о скорости
-		w.baudRate(c)
-	case DATASIZE, DATASIZE + SERVER:
-		if v > 0 {
-			info += fmt.Sprintf("%d", v)
-		} else {
-			info += "?"
-		}
-		cl.remote.DataBits = v
-		if w.rfc2217 == nil {
-			w.set(c, cl)
-			w.mode.DataBits = cl.remote.DataBits
-			return
-		}
-		if v > 0 {
-			w.SetMode(&cl.remote)
-			return
-		}
-		w.dataBits(c)
-	case PARITY, PARITY + SERVER:
-		switch v {
-		case 1:
-			cl.remote.Parity = serial.NoParity
-			info += "N"
-		case 2:
-			cl.remote.Parity = serial.OddParity
-			info += "O"
-		case 3:
-			cl.remote.Parity = serial.EvenParity
-			info += "E"
-		case 4:
-			cl.remote.Parity = serial.MarkParity
-			info += "M"
-		case 5:
-			cl.remote.Parity = serial.SpaceParity
-			info += "S"
-		default:
-			info += "?"
-		}
-		if w.rfc2217 == nil {
-			w.set(c, cl)
-			w.mode.Parity = cl.remote.Parity
-			return
-		}
-		if v > 0 {
-			w.SetMode(&cl.remote)
-			return
-		}
-		w.parity(c)
-	case STOPSIZE, STOPSIZE + SERVER:
-		switch v {
-		case 1:
-			cl.remote.StopBits = serial.OneStopBit
-			info += "1"
-		case 2:
-			cl.remote.StopBits = serial.TwoStopBits
-			info += "2"
-		case 3:
-			cl.remote.StopBits = serial.OnePointFiveStopBits
-			info += "1.5"
-		default:
-			info += "?"
-		}
-		if w.rfc2217 == nil {
-			w.set(c, cl)
-			w.mode.StopBits = cl.remote.StopBits
-			return
-		}
-		if v > 0 {
-			w.SetMode(&cl.remote)
-			return
-		}
-		w.stopBits(c)
-	case CONTROL, CONTROL + SERVER:
-		info += "N"
 	}
+}
+
+// Заменяем IAC на IAC IAC.
+func escapeIAC(b []byte) []byte {
+	return bytes.ReplaceAll(b, []byte{telnet.IAC}, []byte{telnet.IAC, telnet.IAC})
+}
+
+// Используем не по RFC для -Hcmd -Hbash.
+func spam(c *telnet.Connection, opt, subopt byte, v string) (err error) {
+	b := new(bytes.Buffer)
+	b.Write([]byte{telnet.IAC, telnet.SB, opt, subopt})
+	if len(v) > 0 {
+		payload := new(bytes.Buffer)
+		payload.WriteString(v)
+		b.Write(escapeIAC(payload.Bytes()))
+	}
+	b.Write([]byte{telnet.IAC, telnet.SE})
+	_, err = c.Conn.Write(b.Bytes())
+	if len(v) > 0 {
+		log.Printf("%s->%s Signature %v\r\n", c.LocalAddr(), c.RemoteAddr(), v)
+	}
+	return
+}
+
+// Немного о себе.
+func (w *SerialWorker) signature(c *telnet.Connection) (err error) {
+	if !w.enable(c) {
+		return
+	}
+	subopt := SIGNATURE
+	v := w.path
+	if w.rfc2217 == nil {
+		// Клиент.
+		v = c.LocalAddr().String()
+	} else {
+		subopt += SERVER
+	}
+
+	err = spam(c, w.OptionCode(), subopt, v)
+	w.setEnable(c, err == nil)
+	return
 }
