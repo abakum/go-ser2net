@@ -1,6 +1,6 @@
 module github.com/abakum/go-ser2net
 
-go 1.21.0
+go 1.21
 
 // replace github.com/sorenisanerd/gotty => ../gotty
 // replace github.com/abakum/go-console => ../go-console
