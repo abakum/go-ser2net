@@ -36,8 +36,8 @@ func (w *SerialWorker) Client1073(c *telnet.Connection) telnet.Negotiator {
 		w.like = &likeSerialPort{}
 	}
 	ctx = w.context
-	w.like.ws, _ = size()
-	log.Printf("%s client %s connected to %s. WxH: %dx%d\r\n", cmdOpt(w.like.OptionCode()), c.LocalAddr(), c.RemoteAddr(), w.like.ws.Width, w.like.ws.Height)
+	// w.like.ws, _ = size()
+	// log.Printf("%s client %s connected to %s. WxH: %dx%d\r\n", cmdOpt(w.like.OptionCode()), c.LocalAddr(), c.RemoteAddr(), w.like.ws.Width, w.like.ws.Height)
 	return w.like
 }
 
@@ -90,7 +90,7 @@ func (l *likeSerialPort) HandleSB(c *telnet.Connection, b []byte) {
 		// Сервер.
 		l.ws.Width = binary.BigEndian.Uint16(b[0:2])
 		l.ws.Height = binary.BigEndian.Uint16(b[2:4])
-		log.Printf("%s<=%s IAC SB %v %s WxH: %dx%d\r\n", c.LocalAddr(), c.RemoteAddr(), b, cmdOpt(l.OptionCode()), l.ws.Width, l.ws.Height)
+		log.Printf("%s<=%s IAC SB %v %s %dx%d\r\n", c.LocalAddr(), c.RemoteAddr(), b, cmdOpt(l.OptionCode()), l.ws.Width, l.ws.Height)
 		l.console.SetSize(int(l.ws.Width), int(l.ws.Height))
 	}
 }
@@ -118,7 +118,7 @@ func (l *likeSerialPort) monitorSizeTTY(c *telnet.Connection) {
 						continue
 					}
 					if ws.Width != l.ws.Width || ws.Height != l.ws.Height {
-						log.Printf("After %v->%v", l.ws, ws)
+						// log.Printf("After %v->%v", l.ws, ws)
 						Change <- tsize.Size{
 							Width:  int(ws.Width),
 							Height: int(ws.Height),
@@ -158,7 +158,7 @@ func (l *likeSerialPort) sizeTTY(c *telnet.Connection) {
 	binary.Write(payload, binary.BigEndian, l.ws.Height)
 	b.Write(escapeIAC(payload.Bytes()))
 	b.Write([]byte{telnet.IAC, telnet.SE})
-	_, err := c.Conn.Write(b.Bytes())
+	c.Conn.Write(b.Bytes())
 
-	log.Printf("%s->%s %s %dx%d err:%v\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(l.OptionCode()), l.ws.Width, l.ws.Height, err)
+	log.Printf("%s->%s %s %dx%d\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(l.OptionCode()), l.ws.Width, l.ws.Height)
 }

@@ -77,7 +77,8 @@ func (w *SerialWorker) Offer(c *telnet.Connection) {
 // Сервер шлёт подпись и мониторит отключени клиентов.
 func (w *SerialWorker) HandleWill(c *telnet.Connection) {
 	handle(c, telnet.WILL, w.OptionCode())
-	if w.rfc2217 == nil || w.exist(c) {
+	if w.rfc2217 == nil ||
+		w.exist(c) {
 		// Клиент.
 		// Защита от второго WILL.
 		return
