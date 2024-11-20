@@ -19,6 +19,7 @@ import (
 	"github.com/PatrickRudolph/telnet"
 	"github.com/PatrickRudolph/telnet/options"
 	"github.com/abakum/go-console"
+	ts "github.com/kopoli/go-terminal-size"
 	"github.com/sorenisanerd/gotty/server"
 	"github.com/sorenisanerd/gotty/utils"
 	"github.com/xlab/closer"
@@ -61,7 +62,7 @@ type SerialWorker struct {
 	pid  int
 	// -22
 	rfc2217 *telnet.Server
-	cls     map[string]Client
+	cls     map[string]*Client
 	clm     sync.Mutex // Для cls
 	remote  string
 }
@@ -207,37 +208,34 @@ func (w *SerialWorker) SetMode(mode *serial.Mode) (err error) {
 		w.mode = *mode
 		// Рассылает всем изменения mode.
 		for _, cl := range w.cls {
-			if !cl.enable {
-				continue
-			}
-			ok := false
+			// ok := false
 			if cl.remote.BaudRate != mode.BaudRate {
 				if w.baudRate(cl.c) == nil {
 					cl.remote.BaudRate = mode.BaudRate
-					ok = true
+					// ok = true
 				}
 			}
 			if cl.remote.DataBits != mode.DataBits {
 				if w.dataBits(cl.c) == nil {
 					cl.remote.DataBits = mode.DataBits
-					ok = true
+					// ok = true
 				}
 			}
 			if cl.remote.Parity != mode.Parity {
 				if w.parity(cl.c) == nil {
 					cl.remote.Parity = mode.Parity
-					ok = true
+					// ok = true
 				}
 			}
 			if cl.remote.StopBits != mode.StopBits {
 				if w.stopBits(cl.c) == nil {
 					cl.remote.StopBits = mode.StopBits
-					ok = true
+					// ok = true
 				}
 			}
-			if ok {
-				w.set(cl.c, cl)
-			}
+			// if ok {
+			// 	w.set(cl.c, cl)
+			// }
 		}
 	}
 	return
@@ -392,10 +390,12 @@ func (w *SerialWorker) rxWorker() {
 					}
 					if err == io.EOF || strings.Contains(err.Error(), "/dev/ptmx:") {
 						log.Printf("%v\r\n", err)
-						time.AfterFunc(time.Second, closer.Close)
 						// w.Stop()
 					} else {
 						log.Printf("error reading from serial: %v\r\n", err)
+					}
+					if w.like != nil {
+						time.AfterFunc(time.Second, closer.Close)
 					}
 					// w.connected = false
 
@@ -808,7 +808,7 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 	var w SerialWorker
 	if path == "" {
 		w.mode = serial.Mode{}
-		w.cls = make(map[string]Client)
+		w.cls = make(map[string]*Client)
 		w.context = context
 		return &w, nil
 	}
@@ -831,7 +831,7 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 	w.lastErr = "Serial is not connected"
 	w.context = context
 	w.quitting = false
-	w.cls = make(map[string]Client)
+	w.cls = make(map[string]*Client)
 
 	// Команда или интерпретатор команд
 	args, ok := IsCommand(path)
@@ -881,6 +881,7 @@ type likeSerialPort struct {
 	command bool
 	console console.Console
 	ws      WinSize
+	ts      ts.Size
 }
 
 func openLike(w *SerialWorker) (port serial.Port, l *likeSerialPort, err error) {
@@ -934,6 +935,7 @@ func (l *likeSerialPort) Close() error {
 		return nil
 	}
 	IAC(l.conn, telnet.DO, telnet.TeloptLOGOUT)
+	// time.Sleep(time.Millisecond * 11)
 	err := l.conn.Close()
 	// log.Println("l.conn.Close")
 	return err
