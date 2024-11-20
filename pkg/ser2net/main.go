@@ -19,7 +19,6 @@ import (
 	"github.com/PatrickRudolph/telnet"
 	"github.com/PatrickRudolph/telnet/options"
 	"github.com/abakum/go-console"
-	ts "github.com/kopoli/go-terminal-size"
 	"github.com/sorenisanerd/gotty/server"
 	"github.com/sorenisanerd/gotty/utils"
 	"github.com/xlab/closer"
@@ -881,7 +880,6 @@ type likeSerialPort struct {
 	command bool
 	console console.Console
 	ws      WinSize
-	ts      ts.Size
 }
 
 func openLike(w *SerialWorker) (port serial.Port, l *likeSerialPort, err error) {

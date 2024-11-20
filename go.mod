@@ -4,13 +4,13 @@ go 1.21.0
 
 // replace github.com/sorenisanerd/gotty => ../gotty
 // replace github.com/abakum/go-console => ../go-console
-// replace github.com/kopoli/go-terminal-size => ../go-terminal-size
+// replace github.com/abakum/go-terminal-size => ../go-terminal-size
 
 require (
 	github.com/PatrickRudolph/telnet v0.0.0-20210301083732-6a03c1f7971f
+	github.com/abakum/go-terminal-size v0.0.0-20241120133957-a6f83fcffc34
 	github.com/containerd/console v1.0.4
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
-	github.com/kopoli/go-terminal-size v0.0.0-20170219200355-5c97524c8b54
 	github.com/mattn/go-isatty v0.0.20
 	github.com/sorenisanerd/gotty v1.5.1-0.20240325190845-c69d11d17d83
 	github.com/xlab/closer v1.1.0

@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/binary"
 	"log"
+	"runtime"
+	"time"
 
 	"github.com/PatrickRudolph/telnet"
-	tsize "github.com/kopoli/go-terminal-size"
+	tsize "github.com/abakum/go-terminal-size"
 )
 
 // Путь к команде.
@@ -68,12 +70,7 @@ func (l *likeSerialPort) HandleDo(c *telnet.Connection) {
 	handle(c, telnet.DO, l.OptionCode())
 	if l.console == nil {
 		// Клиент.
-		var err error
-		l.ts, err = tsize.GetSize()
-		if err != nil {
-			log.Printf("GetSize failed\r\n")
-			return
-		}
+		l.ws, _ = size()
 		l.sizeTTY(c)
 		// Защита от второго DO.
 		if once {
@@ -91,58 +88,62 @@ func (l *likeSerialPort) HandleSB(c *telnet.Connection, b []byte) {
 	}
 	if l.console != nil {
 		// Сервер.
-		// l.ws.Width = binary.BigEndian.Uint16(b[0:2])
-		l.ts.Width = int(binary.BigEndian.Uint16(b[0:2]))
-		// l.ws.Height = binary.BigEndian.Uint16(b[2:4])
-		l.ts.Height = int(binary.BigEndian.Uint16(b[2:4]))
-		// log.Printf("%s<=%s IAC SB %v %s WxH: %dx%d\r\n", c.LocalAddr(), c.RemoteAddr(), b, cmdOpt(l.OptionCode()), l.ws.Width, l.ws.Height)
-		log.Printf("%s<=%s IAC SB %v %s WxH: %dx%d\r\n", c.LocalAddr(), c.RemoteAddr(), b, cmdOpt(l.OptionCode()), l.ts.Width, l.ts.Height)
-		// l.console.SetSize(int(l.ws.Width), int(l.ws.Height))
-		// l.console.SetSize(l.ts.Width, l.ts.Height)
+		l.ws.Width = binary.BigEndian.Uint16(b[0:2])
+		l.ws.Height = binary.BigEndian.Uint16(b[2:4])
+		log.Printf("%s<=%s IAC SB %v %s WxH: %dx%d\r\n", c.LocalAddr(), c.RemoteAddr(), b, cmdOpt(l.OptionCode()), l.ws.Width, l.ws.Height)
+		l.console.SetSize(int(l.ws.Width), int(l.ws.Height))
 	}
 }
 
 // Сравниваю size с l.ws и если отличаются то передаю на сервер.
 func (l *likeSerialPort) monitorSizeTTY(c *telnet.Connection) {
-	s, err := tsize.GetSize()
-	if err != nil {
-		log.Printf("monitorSizeTTY GetSize failed\r\n")
-		return
-	}
 	sl, err := tsize.NewSizeListener()
 	if err != nil {
-		log.Printf("monitorSizeTTY NewSizeListener failed\r\n")
-		return
+		defer sl.Close()
 	}
-	defer sl.Close()
+	if runtime.GOOS == "windows" || err != nil {
+		if err == nil {
+			sl.Close()
+		}
+		Change := make(chan tsize.Size)
+		sl = &tsize.SizeListener{Change: Change}
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Second):
+					ws, err := size()
+					if err != nil {
+						continue
+					}
+					if ws.Width != l.ws.Width || ws.Height != l.ws.Height {
+						Change <- tsize.Size{
+							Width:  int(ws.Width),
+							Height: int(ws.Height),
+						}
+					}
+				}
+			}
+		}()
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("monitorSizeTTY ctx.Done\r\n")
+			log.Printf("monitorSizeTTY SerialWorker.context.Done\r\n")
 			return
-		case s = <-sl.Change:
-			log.Printf("sc.Change %dx%d\r\n", s.Width, s.Height)
+		case <-time.After(time.Second):
 			if l.closed {
-				log.Printf("likeSerialPort.closed\r\n")
+				log.Printf("monitorSizeTTY likeSerialPort.closed\r\n")
 				return
 			}
-			l.ts = s
-			l.ws, _ = size()
+		case s := <-sl.Change:
+			// Ежесекундный опрос в Windows.
+			// По сигналу в Unix.
+			l.ws.Width = uint16(s.Width)
+			l.ws.Height = uint16(s.Height)
 			l.sizeTTY(c)
-			// case <-time.After(time.Second):
-			// 	if l.closed {
-			// 		// log.Printf("monitorSizeTTY l.closed\r\n")
-			// 		return
-			// 	}
-			// 	ws, err := size()
-			// 	if err != nil {
-			// 		continue
-			// 	}
-			// 	if ws.Width != l.ws.Width || ws.Height != l.ws.Height {
-			// 		l.ws = ws
-			// 		l.sizeTTY(c)
-			// 	}
 		}
 	}
 }
@@ -153,13 +154,10 @@ func (l *likeSerialPort) sizeTTY(c *telnet.Connection) {
 	b.Write([]byte{telnet.IAC, telnet.SB, l.OptionCode()})
 	payload := new(bytes.Buffer)
 	binary.Write(payload, binary.BigEndian, l.ws.Width)
-	// binary.Write(payload, binary.BigEndian, uint16(l.ts.Width))
 	binary.Write(payload, binary.BigEndian, l.ws.Height)
-	// binary.Write(payload, binary.BigEndian, uint16(l.ts.Height))
 	b.Write(escapeIAC(payload.Bytes()))
 	b.Write([]byte{telnet.IAC, telnet.SE})
 	_, err := c.Conn.Write(b.Bytes())
 
 	log.Printf("%s->%s %s %dx%d err:%v\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(l.OptionCode()), l.ws.Width, l.ws.Height, err)
-	// log.Printf("%s->%s %s %dx%d err:%v\r\n", c.LocalAddr(), c.RemoteAddr(), cmdOpt(l.OptionCode()), l.ts.Width, l.ts.Height, err)
 }

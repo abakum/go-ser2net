@@ -6,6 +6,8 @@ github.com/abakum/embed-encrypt v0.0.1 h1:1kG2vOZQfchsOLttvZoGmv42b2c3UmckkOYdbn
 github.com/abakum/embed-encrypt v0.0.1/go.mod h1:f2J6T21Ou8GFGrgxnJY1a49ZInLvZQQgZCf7xaPpmus=
 github.com/abakum/go-console v0.0.1 h1:AMnxwQnzg4j5J8gliXdvdaFzNPC4km/N2pXt0kQfgf4=
 github.com/abakum/go-console v0.0.1/go.mod h1:WXaFNcb4jHcrjFo8/A/Vbd6Zevu/B2LiOf5NPCMuF5w=
+github.com/abakum/go-terminal-size v0.0.0-20241120133957-a6f83fcffc34 h1:fGgdFI+ZWGP7f2OWIKeEp/JkKHd9JyH0TMsFyo6Rd+0=
+github.com/abakum/go-terminal-size v0.0.0-20241120133957-a6f83fcffc34/go.mod h1:Kh2hJ9LA4tefRZRPc4rNTU3OVlv8xstYKYASbl2QsJE=
 github.com/containerd/console v1.0.4 h1:F2g4+oChYvBTsASRTz8NP6iIAi97J3TtSAsLbIFn4ro=
 github.com/containerd/console v1.0.4/go.mod h1:YynlIjWYF8myEu6sdkwKIvGQq+cOckRm6So2avqoYAk=
 github.com/cpuguy83/go-md2man/v2 v2.0.2 h1:p1EgwI/C7NhT0JmVkwCD2ZBK8j4aeHQX2pMHHBfMQ6w=
@@ -30,8 +32,6 @@ github.com/hashicorp/go-multierror v1.1.1 h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+l
 github.com/hashicorp/go-multierror v1.1.1/go.mod h1:iw975J/qwKPdAO1clOe2L8331t/9/fmwbPZ6JB6eMoM=
 github.com/iamacarpet/go-winpty v1.0.4 h1:r42xaLLRZcUqjX6vHZeHos2haACfWkooOJTnFdogBfI=
 github.com/iamacarpet/go-winpty v1.0.4/go.mod h1:50yLtqN2hFb5sYO5Qm2LegB166oAEw/PZYRn+FPWj0Q=
-github.com/kopoli/go-terminal-size v0.0.0-20170219200355-5c97524c8b54 h1:0SMHxjkLKNawqUjjnMlCtEdj6uWZjv0+qDZ3F6GOADI=
-github.com/kopoli/go-terminal-size v0.0.0-20170219200355-5c97524c8b54/go.mod h1:bm7MVZZvHQBfqHG5X59jrRE/3ak6HvK+/Zb6aZhLR2s=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
