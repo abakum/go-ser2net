@@ -118,6 +118,7 @@ func (l *likeSerialPort) monitorSizeTTY(c *telnet.Connection) {
 						continue
 					}
 					if ws.Width != l.ws.Width || ws.Height != l.ws.Height {
+						log.Printf("After %v->%v", l.ws, ws)
 						Change <- tsize.Size{
 							Width:  int(ws.Width),
 							Height: int(ws.Height),
