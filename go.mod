@@ -8,7 +8,7 @@ go 1.21
 
 require (
 	github.com/PatrickRudolph/telnet v0.0.0-20210301083732-6a03c1f7971f
-	github.com/abakum/go-terminal-size v0.0.0-20241120133957-a6f83fcffc34
+	github.com/abakum/go-terminal-size v0.0.0-20241120142632-2e3252fa87fa
 	github.com/containerd/console v1.0.4
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/mattn/go-isatty v0.0.20
