@@ -8,7 +8,9 @@ go 1.21
 
 require (
 	github.com/PatrickRudolph/telnet v0.0.0-20210301083732-6a03c1f7971f
+	github.com/abakum/cancelreader v0.0.0-20241122215017-9e298cf19164
 	github.com/abakum/go-terminal-size v0.0.0-20241120142632-2e3252fa87fa
+	github.com/abakum/term v0.0.1
 	github.com/containerd/console v1.0.4
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/mattn/go-isatty v0.0.20
@@ -21,6 +23,7 @@ require (
 require (
 	github.com/NYTimes/gziphandler v1.1.1 // indirect
 	github.com/abakum/embed-encrypt v0.0.1 // indirect
+	github.com/abakum/go-ansiterm v0.0.1 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/creack/goselect v0.1.2 // indirect
 	github.com/creack/pty v1.1.21 // indirect

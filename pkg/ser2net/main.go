@@ -21,7 +21,6 @@ import (
 	"github.com/abakum/go-console"
 	"github.com/sorenisanerd/gotty/server"
 	"github.com/sorenisanerd/gotty/utils"
-	"github.com/xlab/closer"
 	"go.bug.st/serial"
 )
 
@@ -59,6 +58,7 @@ type SerialWorker struct {
 	// -Hcmd
 	args []string
 	pid  int
+	in   *Stdin
 	// -22
 	rfc2217 *telnet.Server
 	cls     map[string]*Client
@@ -207,34 +207,26 @@ func (w *SerialWorker) SetMode(mode *serial.Mode) (err error) {
 		w.mode = *mode
 		// Рассылает всем изменения mode.
 		for _, cl := range w.cls {
-			// ok := false
 			if cl.remote.BaudRate != mode.BaudRate {
 				if w.baudRate(cl.c) == nil {
 					cl.remote.BaudRate = mode.BaudRate
-					// ok = true
 				}
 			}
 			if cl.remote.DataBits != mode.DataBits {
 				if w.dataBits(cl.c) == nil {
 					cl.remote.DataBits = mode.DataBits
-					// ok = true
 				}
 			}
 			if cl.remote.Parity != mode.Parity {
 				if w.parity(cl.c) == nil {
 					cl.remote.Parity = mode.Parity
-					// ok = true
 				}
 			}
 			if cl.remote.StopBits != mode.StopBits {
 				if w.stopBits(cl.c) == nil {
 					cl.remote.StopBits = mode.StopBits
-					// ok = true
 				}
 			}
-			// if ok {
-			// 	w.set(cl.c, cl)
-			// }
 		}
 	}
 	return
@@ -249,14 +241,7 @@ func (w *SerialWorker) SerialClose() error {
 		return nil
 	}
 	w.connected = false
-	// log.Println("SerialWorker.SerialClose")
-	if w.like != nil {
-		return w.like.Close()
-	}
-	if w.serialConn != nil {
-		return SerialClose(w.serialConn)
-	}
-	return nil
+	return SerialClose(w.serialConn)
 }
 
 // Когда ждать connectSerial не хорошо
@@ -389,14 +374,13 @@ func (w *SerialWorker) rxWorker() {
 					}
 					if err == io.EOF || strings.Contains(err.Error(), "/dev/ptmx:") {
 						log.Printf("%v\r\n", err)
-						// w.Stop()
 					} else {
 						log.Printf("error reading from serial: %v\r\n", err)
 					}
-					if w.like != nil {
-						time.AfterFunc(time.Second, closer.Close)
+					_, ok := w.serialConn.(*likeSerialPort)
+					if ok && w.in != nil {
+						log.Printf("Cancel %v\r\n", w.in.Cancel())
 					}
-					// w.connected = false
 
 					porterr, ok := err.(serial.PortError)
 					if ok {
@@ -1070,12 +1054,43 @@ func CopyAfter(ctx context.Context, dst io.Writer, src io.Reader, delay time.Dur
 	)
 }
 
+func (w *SerialWorker) CopyCancel(dst io.Writer, src io.Reader) (written int64, err error) {
+	written, err = io.Copy(dst, src)
+	// log.Printf("CopyCancel done\r\n")
+	if w.in != nil {
+		log.Printf("Cancel %v\r\n", w.in.Cancel())
+	}
+	return
+}
+func (w *SerialWorker) CancelCopy(dst io.Writer, src io.Reader) (written int64, err error) {
+	s := src
+	_, ok := w.serialConn.(*likeSerialPort)
+	if ok {
+		w.in, err = NewStdin()
+		if err == nil {
+			s = w.in
+			log.Printf("cancelreader\r\n")
+			defer func() {
+				w.in.Close()
+				w.in = nil
+			}()
+		}
+	}
+	written, err = io.Copy(dst, s)
+	// log.Printf("CancelCopy done\r\n")
+	return
+}
+
 func (w *SerialWorker) Copy(dst io.Writer, src io.Reader) (written int64, err error) {
-	return Copy(w.context, dst, src)
+	written, err = Copy(w.context, dst, src)
+	w.cancel()
+	return
 }
 
 func (w *SerialWorker) CopyAfter(dst io.Writer, src io.Reader, delay time.Duration) (written int64, err error) {
-	return CopyAfter(w.context, dst, src, delay)
+	written, err = CopyAfter(w.context, dst, src, delay)
+	w.cancel()
+	return
 }
 
 func LocalPort(addr string) string {

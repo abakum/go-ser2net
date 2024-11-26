@@ -6,6 +6,7 @@ package ser2net
 import (
 	"os"
 
+	"github.com/abakum/cancelreader"
 	"github.com/google/shlex"
 	"golang.org/x/sys/unix"
 )
@@ -28,4 +29,27 @@ func size() (WinSize, error) {
 
 func splitCommandLine(command string) ([]string, error) {
 	return shlex.Split(command)
+}
+
+// Для прерывания io.Copy(x, os.Stdin)
+type Stdin struct {
+	cancelreader.CancelReader
+}
+
+// Конструктор Stdin
+func NewStdin() (*Stdin, error) {
+	cr, err := cancelreader.NewReader(os.Stdin)
+	return &Stdin{
+		CancelReader: cr,
+	}, err
+}
+
+// Деструктор Stdin
+func (s *Stdin) Close() error {
+	return s.CancelReader.Close()
+}
+
+// Прерывает io.Copy(x, os.Stdin)
+func (s *Stdin) Cancel() bool {
+	return s.CancelReader.Cancel()
 }
