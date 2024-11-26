@@ -136,7 +136,7 @@ func (l *likeSerialPort) monitorSizeTTY(c *telnet.Connection) {
 			return
 		case <-time.After(time.Second):
 			if l.closed {
-				log.Printf("monitorSizeTTY likeSerialPort.closed\r\n")
+				// log.Printf("monitorSizeTTY likeSerialPort.closed\r\n")
 				return
 			}
 		case s := <-sl.Change:

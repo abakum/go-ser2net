@@ -144,8 +144,9 @@ func (m Mode) String() string {
 	return fmt.Sprintf("%s%d,%d,%s,%s",
 		path, m.BaudRate, m.DataBits, p, s)
 }
-func (w *SerialWorker) Url() string {
-	return w.url
+func (w *SerialWorker) IsSerial() (ok bool) {
+	_, ok = w.serialConn.(*likeSerialPort)
+	return
 }
 
 func (w *SerialWorker) String() string {
@@ -377,8 +378,7 @@ func (w *SerialWorker) rxWorker() {
 					} else {
 						log.Printf("error reading from serial: %v\r\n", err)
 					}
-					_, ok := w.serialConn.(*likeSerialPort)
-					if ok && w.in != nil {
+					if !w.IsSerial() && w.in != nil {
 						log.Printf("Cancel %v\r\n", w.in.Cancel())
 					}
 
@@ -1064,8 +1064,7 @@ func (w *SerialWorker) CopyCancel(dst io.Writer, src io.Reader) (written int64, 
 }
 func (w *SerialWorker) CancelCopy(dst io.Writer, src io.Reader) (written int64, err error) {
 	s := src
-	_, ok := w.serialConn.(*likeSerialPort)
-	if ok {
+	if !w.IsSerial() {
 		w.in, err = NewStdin()
 		if err == nil {
 			s = w.in
