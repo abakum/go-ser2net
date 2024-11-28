@@ -41,6 +41,7 @@ func splitCommandLine(command string) ([]string, error) {
 type Stdin struct {
 	io.ReadCloser
 	closed bool
+	cancel func() error
 }
 
 // Конструктор Stdin
@@ -56,7 +57,9 @@ func (s *Stdin) Close() error {
 	if s.closed {
 		return nil
 	}
-
+	if s.cancel != nil {
+		return s.cancel()
+	}
 	return s.ReadCloser.Close()
 }
 
@@ -64,6 +67,9 @@ func (s *Stdin) Close() error {
 func (s *Stdin) Cancel() (ok bool) {
 	if s.closed {
 		return false
+	}
+	if s.cancel != nil {
+		return s.cancel() == nil
 	}
 	// Чтоб прерыватель сработал в Windows окно с ним должно получать события
 	kernel32 := syscall.NewLazyDLL("kernel32.dll")
@@ -85,7 +91,7 @@ func (s *Stdin) Cancel() (ok bool) {
 			log.Printf("ShowWindowAsync @SW_SHOW %v %v\r\n", r2, err)
 		} else {
 			r1, r2, err := SetForegroundWindow.Call(consoleHandle)
-			if r1 == 0 {
+			if r1 == 0 && err != nil && err.Error() != "The operation completed successfully." {
 				log.Printf("SetForegroundWindow %v %v\r\n", r2, err)
 			}
 		}

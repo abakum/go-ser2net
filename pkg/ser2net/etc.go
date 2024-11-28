@@ -34,6 +34,7 @@ func splitCommandLine(command string) ([]string, error) {
 // Для прерывания io.Copy(x, os.Stdin)
 type Stdin struct {
 	cancelreader.CancelReader
+	cancel func() error
 }
 
 // Конструктор Stdin
@@ -46,10 +47,16 @@ func NewStdin() (*Stdin, error) {
 
 // Деструктор Stdin
 func (s *Stdin) Close() error {
+	if s.cancel != nil {
+		return s.cancel()
+	}
 	return s.CancelReader.Close()
 }
 
 // Прерывает io.Copy(x, os.Stdin)
 func (s *Stdin) Cancel() bool {
+	if s.cancel != nil {
+		return s.cancel() == nil
+	}
 	return s.CancelReader.Cancel()
 }

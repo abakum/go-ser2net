@@ -84,8 +84,6 @@ func (w *SerialWorker) HandleWill(c *telnet.Connection) {
 		return
 	}
 	cl := w.get(c) // Как сервер представляет клиента.
-	cl.done = make(chan bool)
-	// w.set(c, cl)
 	w.iac(c, telnet.DO, w.OptionCode())
 	w.signature(c)
 	go func() {
@@ -100,6 +98,11 @@ func (w *SerialWorker) HandleWill(c *telnet.Connection) {
 				return
 			case <-w.context.Done():
 				log.Printf("%s client %s is disconnected by server\r\n", cmdOpt(w.OptionCode()), c.RemoteAddr())
+				// Без RFC. Последний выдох.
+				// c.Conn.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), DATASIZE + SERVER,
+				// 	0,
+				// 	telnet.IAC, telnet.SE})
+				// time.Sleep(time.Millisecond * 33)
 				return
 			case <-time.After(ALIVE):
 				if !w.exist(c) {
@@ -183,14 +186,15 @@ func (w *SerialWorker) HandleSB(c *telnet.Connection, b []byte) {
 			info += "?"
 		}
 		log.Print(info, "\r\n")
-		cl.remote.BaudRate = v
 		if client {
-			// w.set(c, cl)
+			cl.remote.BaudRate = v
 			w.mode.BaudRate = cl.remote.BaudRate
 			return
 		}
 		// Сервер
 		if v > 0 {
+			cl.remote.BaudRate = v
+			cl.last = time.Now()
 			w.SetMode(&cl.remote)
 			return
 		}
@@ -200,72 +204,88 @@ func (w *SerialWorker) HandleSB(c *telnet.Connection, b []byte) {
 		if v > 0 {
 			info += fmt.Sprintf("%d", v)
 		} else {
+			// if client {
+			// 	info = fmt.Sprintf("%s<=%s IAC SB %v %s ", c.LocalAddr(), c.RemoteAddr(), b, "Dying gasp of server")
+			// } else {
 			info += "?"
+			// }
 		}
 		log.Print(info, "\r\n")
-		cl.remote.DataBits = v
 		if client {
-			// w.set(c, cl)
+			// if v == 0 {
+			// 	// Без RFC. Последний выдох.
+			// 	if w.in != nil {
+			// 		log.Printf("Cancel %v\r\n", w.in.Cancel())
+			// 	}
+			// 	return
+			// }
+			cl.remote.DataBits = v
 			w.mode.DataBits = cl.remote.DataBits
 			return
 		}
 		if v > 0 {
+			cl.remote.DataBits = v
+			cl.last = time.Now()
 			w.SetMode(&cl.remote)
 			return
 		}
 		w.dataBits(c)
 	case PARITY, PARITY + SERVER:
+		s := serial.NoParity
 		switch v {
 		case 1:
-			cl.remote.Parity = serial.NoParity
 			info += "N"
 		case 2:
-			cl.remote.Parity = serial.OddParity
+			s = serial.OddParity
 			info += "O"
 		case 3:
-			cl.remote.Parity = serial.EvenParity
+			s = serial.EvenParity
 			info += "E"
 		case 4:
-			cl.remote.Parity = serial.MarkParity
+			s = serial.MarkParity
 			info += "M"
 		case 5:
-			cl.remote.Parity = serial.SpaceParity
+			s = serial.SpaceParity
 			info += "S"
 		default:
 			info += "?"
 		}
 		log.Print(info, "\r\n")
 		if client {
-			// w.set(c, cl)
+			cl.remote.Parity = s
 			w.mode.Parity = cl.remote.Parity
 			return
 		}
 		if v > 0 {
+			cl.remote.Parity = s
+			cl.last = time.Now()
 			w.SetMode(&cl.remote)
 			return
 		}
 		w.parity(c)
 	case STOPSIZE, STOPSIZE + SERVER:
+		s := serial.OneStopBit
 		switch v {
 		case 1:
-			cl.remote.StopBits = serial.OneStopBit
 			info += "1"
 		case 2:
-			cl.remote.StopBits = serial.TwoStopBits
+			s = serial.TwoStopBits
 			info += "2"
 		case 3:
-			cl.remote.StopBits = serial.OnePointFiveStopBits
+			s = serial.OnePointFiveStopBits
 			info += "1.5"
 		default:
 			info += "?"
 		}
 		log.Print(info, "\r\n")
 		if client {
-			// w.set(c, cl)
+			cl.remote.StopBits = s
 			w.mode.StopBits = cl.remote.StopBits
 			return
 		}
 		if v > 0 {
+			cl.remote.StopBits = s
+			cl.last = time.Now()
 			w.SetMode(&cl.remote)
 			return
 		}
@@ -275,6 +295,7 @@ func (w *SerialWorker) HandleSB(c *telnet.Connection, b []byte) {
 		log.Print(info, "\r\n")
 		if !client {
 			w.control(c)
+			log.Print(w, "\r\n")
 		}
 	}
 }
@@ -443,7 +464,6 @@ func (w *SerialWorker) control(c *telnet.Connection) (err error) {
 		if w.mode.InitialStatusBits == nil {
 			// Чтоб представлялись при смене режима.
 			w.mode.InitialStatusBits = &serial.ModemOutputBits{}
-			// w.set(c, cl)
 			if w.signature(c) != nil {
 				return
 			}
@@ -476,25 +496,18 @@ func (w *SerialWorker) get(c *telnet.Connection) (cl *Client) {
 	if ok {
 		return
 	}
+	// Новый клиент
 	cl = &Client{
-		remote: w.mode,
 		c:      c,
+		remote: w.mode,
+		last:   time.Now(),
+		done:   make(chan bool),
 	}
 	w.clm.Lock()
 	w.cls[s] = cl
 	w.clm.Unlock()
-	// w.set(c, cl)
 	return
 }
-
-// Обновляет или добавляет данные о клиенте.
-// func (w *SerialWorker) set(c *telnet.Connection, cl Client) {
-// 	s := c.RemoteAddr().String()
-// 	cl.last = time.Now()
-// 	w.clm.Lock()
-// 	w.cls[s] = cl
-// 	w.clm.Unlock()
-// }
 
 // Удаляет клиента
 func (w *SerialWorker) del(c *telnet.Connection) {

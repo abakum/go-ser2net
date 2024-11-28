@@ -132,7 +132,7 @@ func (l *likeSerialPort) monitorSizeTTY(c *telnet.Connection) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("monitorSizeTTY SerialWorker.context.Done\r\n")
+			// log.Printf("monitorSizeTTY SerialWorker.context.Done\r\n")
 			return
 		case <-time.After(time.Second):
 			if l.closed {

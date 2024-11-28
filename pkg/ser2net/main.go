@@ -25,10 +25,11 @@ import (
 )
 
 const (
-	B16 = 16
-	K1  = 1024
-	K4  = 4 * K1
-	K32 = 32 * K1
+	b16 = 16
+	k1  = 1024
+	k4  = 4 * k1
+	k32 = 32 * k1
+	lh  = "127.0.0.1"
 )
 
 // SerialWorker instances one serial-network bridge
@@ -144,10 +145,6 @@ func (m Mode) String() string {
 	return fmt.Sprintf("%s%d,%d,%s,%s",
 		path, m.BaudRate, m.DataBits, p, s)
 }
-func (w *SerialWorker) IsSerial() (ok bool) {
-	_, ok = w.serialConn.(*likeSerialPort)
-	return
-}
 
 func (w *SerialWorker) String() string {
 	connected := "connected"
@@ -170,13 +167,14 @@ func (w *SerialWorker) String() string {
 			return fmt.Sprintf("$%s %s",
 				path, connected)
 		}
+		telnet := fmt.Sprintf("telnet://%s %s",
+			LocalPort(w.path), connected)
 		if strings.Contains(connected, "$") {
-			return fmt.Sprintf("telnet://%s %s",
-				LocalPort(w.path), connected)
+			return telnet
 		}
 		if strings.Contains(w.path, ":") {
-			return fmt.Sprintf("telnet://%s %s@%s",
-				LocalPort(w.path), connected, Mode{w.mode, ""})
+			return fmt.Sprintf("%s@%s",
+				telnet, Mode{w.mode, ""})
 		}
 	}
 	if w.remote != "" {
@@ -201,32 +199,39 @@ func (w *SerialWorker) Stop() {
 	}
 }
 
+// Сервер меняет режим консоли и рассылает об этом сообщения клиентам.
+// Клиент посылает сообщение серверу.
 func (w *SerialWorker) SetMode(mode *serial.Mode) (err error) {
-	// log.Printf("SetMode %+v %+v\r\n", *mode, w.cls)
+	if len(w.args) > 0 {
+		// Не сериал
+		return
+	}
 	err = w.serialConn.SetMode(mode)
-	if err == nil && len(w.args) == 0 {
-		w.mode = *mode
-		// Рассылает всем изменения mode.
-		for _, cl := range w.cls {
-			if cl.remote.BaudRate != mode.BaudRate {
-				if w.baudRate(cl.c) == nil {
-					cl.remote.BaudRate = mode.BaudRate
-				}
+	// log.Printf("SetMode %#v\r\n%#v %v\r\n", *mode, w.cls, err)
+	if err != nil {
+		return
+	}
+	w.mode = *mode
+	// Рассылает всем изменения mode.
+	for _, cl := range w.cls {
+		if cl.remote.BaudRate != mode.BaudRate {
+			if w.baudRate(cl.c) == nil {
+				cl.remote.BaudRate = mode.BaudRate
 			}
-			if cl.remote.DataBits != mode.DataBits {
-				if w.dataBits(cl.c) == nil {
-					cl.remote.DataBits = mode.DataBits
-				}
+		}
+		if cl.remote.DataBits != mode.DataBits {
+			if w.dataBits(cl.c) == nil {
+				cl.remote.DataBits = mode.DataBits
 			}
-			if cl.remote.Parity != mode.Parity {
-				if w.parity(cl.c) == nil {
-					cl.remote.Parity = mode.Parity
-				}
+		}
+		if cl.remote.Parity != mode.Parity {
+			if w.parity(cl.c) == nil {
+				cl.remote.Parity = mode.Parity
 			}
-			if cl.remote.StopBits != mode.StopBits {
-				if w.stopBits(cl.c) == nil {
-					cl.remote.StopBits = mode.StopBits
-				}
+		}
+		if cl.remote.StopBits != mode.StopBits {
+			if w.stopBits(cl.c) == nil {
+				cl.remote.StopBits = mode.StopBits
 			}
 		}
 	}
@@ -341,7 +346,7 @@ func (w *SerialWorker) rxWorker() {
 	}
 	// log.Println("rxWorker...")
 
-	b := make([]byte, K1) // B16
+	b := make([]byte, k1) // B16
 	defer func() {
 		w.quitting = true
 		// log.Println("...rxWorker")
@@ -378,7 +383,8 @@ func (w *SerialWorker) rxWorker() {
 					} else {
 						log.Printf("error reading from serial: %v\r\n", err)
 					}
-					if !w.IsSerial() && w.in != nil {
+					_, ok := w.serialConn.(*likeSerialPort)
+					if ok && w.in != nil {
 						log.Printf("Cancel %v\r\n", w.in.Cancel())
 					}
 
@@ -443,7 +449,7 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	rx := make(chan byte, K32)
+	rx := make(chan byte, k32)
 
 	// Add RX fifo
 	w.mux.Lock()
@@ -488,7 +494,7 @@ func (w *SerialWorker) serve(context context.Context, wr io.Writer, rr io.Reader
 	}()
 	go func() {
 		// log.Println("serve Read...")
-		p := make([]byte, K1)
+		p := make([]byte, k1)
 		defer func() {
 			// w.quitting = true
 			wr.(*telnet.Connection).Close()
@@ -561,7 +567,7 @@ func (w *SerialWorker) Close(rx chan byte) {
 
 // Open adds a channel to the internal list
 func (w *SerialWorker) Open() (rx chan byte) {
-	rx = make(chan byte, K32)
+	rx = make(chan byte, k32)
 
 	// Add RX fifo
 	w.mux.Lock()
@@ -795,7 +801,7 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 		w.context = context
 		return &w, nil
 	}
-	w.txJobQueue = make(chan byte, K4)
+	w.txJobQueue = make(chan byte, k4)
 
 	// func (port *windowsPort) setModeParams(mode *Mode, params *dcb) {
 	// 	if mode.BaudRate == 0 {
@@ -1062,21 +1068,37 @@ func (w *SerialWorker) CopyCancel(dst io.Writer, src io.Reader) (written int64, 
 	}
 	return
 }
-func (w *SerialWorker) CancelCopy(dst io.Writer, src io.Reader) (written int64, err error) {
+
+type ReadWriteCloser struct {
+	io.Reader
+	io.WriteCloser
+}
+
+func (w *SerialWorker) CancelCopy(dst io.Writer, src io.ReadCloser) (written int64, err error) {
 	s := src
-	if !w.IsSerial() {
-		w.in, err = NewStdin()
-		if err == nil {
-			s = w.in
-			log.Printf("cancelreader\r\n")
-			defer func() {
-				w.in.Close()
-				w.in = nil
-			}()
+	_, like := w.serialConn.(*likeSerialPort)
+	_, local := src.(ReadWriteCloser)
+	if like {
+		if local {
+			w.in, err = NewStdin()
+			if err == nil {
+				s = w.in
+				// log.Printf("LikeSerial & Local %+v\r\n", w.in)
+				defer func() {
+					w.in.Close()
+					w.in = nil
+				}()
+			}
+		} else {
+			w.in = &Stdin{cancel: src.Close}
+			// log.Printf("LikeSerial & !Local %+v\r\n", w.in)
 		}
 	}
 	written, err = io.Copy(dst, s)
 	// log.Printf("CancelCopy done\r\n")
+	if err != nil && err.Error() == "The handle is invalid." {
+		err = fmt.Errorf("read canceled")
+	}
 	return
 }
 
@@ -1095,7 +1117,39 @@ func (w *SerialWorker) CopyAfter(dst io.Writer, src io.Reader, delay time.Durati
 func LocalPort(addr string) string {
 	addr = strings.TrimPrefix(addr, ":")
 	if _, err := strconv.ParseUint(addr, 10, 16); err == nil {
-		return "127.0.0.1:" + addr
+		return lh + ":" + addr
+	}
+	if strings.HasPrefix(addr, "*:") || strings.HasPrefix(addr, "0.0.0.0:") || strings.HasPrefix(addr, "_:") {
+		ips := Ints()
+		if strings.HasPrefix(addr, "_:") {
+			addr = strings.TrimPrefix(addr, "_:")
+			return ips[0] + ":" + addr
+		}
+		addr = strings.TrimPrefix(addr, "*:")
+		addr = strings.TrimPrefix(addr, "0.0.0.0:")
+		return ips[len(ips)-1] + ":" + addr
 	}
 	return addr
+}
+
+func Ints() (ips []string) {
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			addrs, err := iface.Addrs()
+			if err != nil || iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagRunning == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			for _, addr := range addrs {
+				if strings.Contains(addr.String(), ":") {
+					continue
+				}
+				ips = append(ips, strings.Split(addr.String(), "/")[0])
+			}
+		}
+	}
+	if len(ips) == 0 {
+		ips = append(ips, lh)
+	}
+	return
 }
