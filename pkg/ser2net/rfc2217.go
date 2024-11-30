@@ -51,7 +51,7 @@ func (w *SerialWorker) Client2217(c *telnet.Connection) telnet.Negotiator {
 
 	if w.rfc2217 != nil {
 		// Для клиента RFC2217 на сервере свой экземпляр SerialWorker.
-		w, _ = NewSerialWorker(w.context, "", 0)
+		w, _ = NewSerialWorker(w.context, c.LocalAddr().String(), -1)
 	} else {
 		// Чтоб запросить режим.
 		w.mode = serial.Mode{}
@@ -99,10 +99,10 @@ func (w *SerialWorker) HandleWill(c *telnet.Connection) {
 			case <-w.context.Done():
 				log.Printf("%s client %s is disconnected by server\r\n", cmdOpt(w.OptionCode()), c.RemoteAddr())
 				// Без RFC. Последний выдох.
-				// c.Conn.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), DATASIZE + SERVER,
-				// 	0,
-				// 	telnet.IAC, telnet.SE})
-				// time.Sleep(time.Millisecond * 33)
+				c.Conn.Write([]byte{telnet.IAC, telnet.SB, w.OptionCode(), DATASIZE + SERVER,
+					0,
+					telnet.IAC, telnet.SE})
+				time.Sleep(time.Millisecond * 33)
 				return
 			case <-time.After(ALIVE):
 				if !w.exist(c) {
@@ -204,21 +204,18 @@ func (w *SerialWorker) HandleSB(c *telnet.Connection, b []byte) {
 		if v > 0 {
 			info += fmt.Sprintf("%d", v)
 		} else {
-			// if client {
-			// 	info = fmt.Sprintf("%s<=%s IAC SB %v %s ", c.LocalAddr(), c.RemoteAddr(), b, "Dying gasp of server")
-			// } else {
-			info += "?"
-			// }
+			if client {
+				// Без RFC. Последний выдох.
+				info = fmt.Sprintf("%s<=%s IAC SB %v %s ", c.LocalAddr(), c.RemoteAddr(), b, "Dying gasp of server")
+				log.Print(info, "\r\n")
+				w.Cancel()
+				return
+			} else {
+				info += "?"
+			}
 		}
 		log.Print(info, "\r\n")
 		if client {
-			// if v == 0 {
-			// 	// Без RFC. Последний выдох.
-			// 	if w.in != nil {
-			// 		log.Printf("Cancel %v\r\n", w.in.Cancel())
-			// 	}
-			// 	return
-			// }
 			cl.remote.DataBits = v
 			w.mode.DataBits = cl.remote.DataBits
 			return
@@ -295,7 +292,7 @@ func (w *SerialWorker) HandleSB(c *telnet.Connection, b []byte) {
 		log.Print(info, "\r\n")
 		if !client {
 			w.control(c)
-			log.Print(w, "\r\n")
+			// log.Print(w, "\r\n")
 		}
 	}
 }

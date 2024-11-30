@@ -22,7 +22,7 @@ func (w *SerialWorker) Client727(c *telnet.Connection) telnet.Negotiator {
 	// log.Printf("%s client %s connected to %s\r\n", cmdOpt(l.OptionCode()), c.LocalAddr(), c.RemoteAddr())
 	if w.rfc2217 != nil {
 		// Для клиента RFC727 на сервере свой экземпляр SerialWorker.
-		l.w, _ = NewSerialWorker(l.w.context, "", 0)
+		l.w, _ = NewSerialWorker(l.w.context, c.LocalAddr().String(), -1)
 	}
 	return l
 }

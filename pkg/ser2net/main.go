@@ -168,7 +168,7 @@ func (w *SerialWorker) String() string {
 				path, connected)
 		}
 		telnet := fmt.Sprintf("telnet://%s %s",
-			LocalPort(w.path), connected)
+			w.path, connected)
 		if strings.Contains(connected, "$") {
 			return telnet
 		}
@@ -383,11 +383,7 @@ func (w *SerialWorker) rxWorker() {
 					} else {
 						log.Printf("error reading from serial: %v\r\n", err)
 					}
-					_, ok := w.serialConn.(*likeSerialPort)
-					if ok && w.in != nil {
-						log.Printf("Cancel %v\r\n", w.in.Cancel())
-					}
-
+					w.Cancel()
 					porterr, ok := err.(serial.PortError)
 					if ok {
 						log.Printf("ERR: Reading failed %s\r\n", porterr.EncodedErrorString())
@@ -795,10 +791,28 @@ var DefaultMode = serial.Mode{
 // Если path пустой то это для клиента RFC2217.
 func NewSerialWorker(context context.Context, path string, baud int) (*SerialWorker, error) {
 	var w SerialWorker
-	if path == "" {
+	w.context = context
+	w.cls = make(map[string]*Client)
+	w.lastErr = fmt.Sprintf("%s is not connected", path)
+	w.path = path
+
+	args, ok := IsCommand(path)
+	if ok {
+		// Команда или интерпретатор команд
+		w.path = args[0]
+		w.args = args
+		w.lastErr = fmt.Sprintf("Command %v not started", args)
+	} else if _, _, err := net.SplitHostPort(LocalPort(path)); err == nil {
+		// Клиент telnet
+		w.path = LocalPort(path)
+		w.lastErr = fmt.Sprintf("Serial or command over telnet://%s is not connected", w.path)
+	} else if SerialPath(path) {
+		// Последовательный порт
+		w.lastErr = fmt.Sprintf("Serial %s is not connected", w.path)
+	}
+	if baud < 0 {
+		// Для клиента на сервере
 		w.mode = serial.Mode{}
-		w.cls = make(map[string]*Client)
-		w.context = context
 		return &w, nil
 	}
 	w.txJobQueue = make(chan byte, k4)
@@ -809,27 +823,11 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 	// 	} else {
 	// 		params.BaudRate = uint32(mode.BaudRate)
 	// 	}
+	// }
 
 	w.mode = DefaultMode
 	if baud > 0 {
 		w.mode.BaudRate = baud
-	}
-
-	w.path = path
-	w.connected = false
-	w.lastErr = "Serial is not connected"
-	w.context = context
-	w.quitting = false
-	w.cls = make(map[string]*Client)
-
-	// Команда или интерпретатор команд
-	args, ok := IsCommand(path)
-	if ok {
-		w.path = args[0]
-		w.args = args
-		w.lastErr = fmt.Sprintf("Command %v not started", args)
-	} else if !SerialPath(path) {
-		w.lastErr = fmt.Sprintf("Serial over telnet://%s is not connected", path)
 	}
 
 	return &w, nil
@@ -894,6 +892,7 @@ func openLike(w *SerialWorker) (port serial.Port, l *likeSerialPort, err error) 
 	l.conn, err = telnet.Dial(w.path, w.Client727, w.Client1073, w.Client2217)
 
 	if err != nil {
+		w.quitting = true
 		return nil, nil, err
 	}
 	return l, l, err
@@ -1005,7 +1004,8 @@ func IsCommand(path string) (args []string, ok bool) {
 
 // Похож ли path на последовательную консоль
 func SerialPath(path string) bool {
-	if strings.Contains(path, " ") || strings.Contains(path, ":") {
+	if _, _, err := net.SplitHostPort(path); err == nil || strings.Contains(path, " ") {
+		// if strings.Contains(path, " ") || strings.Contains(path, ":") {
 		return false
 	}
 	return LastDigit(path)
@@ -1031,6 +1031,7 @@ func (rf readFunc) Read(p []byte) (n int, err error) {
 
 // https://github.com/northbright/iocopy/blob/master/iocopy.go
 // Copy wraps [io.Copy] and accepts [context.Context] parameter.
+// Копирует пока в контексте.
 func Copy(ctx context.Context, dst io.Writer, src io.Reader) (written int64, err error) {
 	return io.Copy(
 		dst,
@@ -1046,26 +1047,29 @@ func Copy(ctx context.Context, dst io.Writer, src io.Reader) (written int64, err
 }
 
 // Copy wraps [io.Copy] and accepts [context.Context]  and delay parameters.
+// Копирует пока в контексте с отложенным на delay src.Read.
 func CopyAfter(ctx context.Context, dst io.Writer, src io.Reader, delay time.Duration) (written int64, err error) {
 	return io.Copy(
 		dst,
 		readFunc(func(p []byte) (n int, err error) {
+			t := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
+				t.Stop()
 				return 0, ctx.Err()
-			case <-time.After(delay):
+			case <-t.C:
 				return src.Read(p)
 			}
 		}),
 	)
 }
 
+// Копирует и после завершения вызывает cancel заданный в w.NewCancel(cancel)
 func (w *SerialWorker) CopyCancel(dst io.Writer, src io.Reader) (written int64, err error) {
-	written, err = io.Copy(dst, src)
-	// log.Printf("CopyCancel done\r\n")
-	if w.in != nil {
-		log.Printf("Cancel %v\r\n", w.in.Cancel())
-	}
+	// written, err = io.Copy(dst, src)
+	written, err = w.Copy(dst, src)
+	log.Printf("CopyCancel done\r\n")
+	w.Cancel()
 	return
 }
 
@@ -1094,26 +1098,49 @@ func (w *SerialWorker) CancelCopy(dst io.Writer, src io.ReadCloser) (written int
 			// log.Printf("LikeSerial & !Local %+v\r\n", w.in)
 		}
 	}
-	written, err = io.Copy(dst, s)
-	// log.Printf("CancelCopy done\r\n")
+	// written, err = io.Copy(dst, s)
+	written, err = w.Copy(dst, s)
+	log.Printf("CancelCopy done\r\n")
 	if err != nil && err.Error() == "The handle is invalid." {
 		err = fmt.Errorf("read canceled")
 	}
 	return
 }
 
+// Устанавливает функцию cancel для прекращения встречного копирования.
+func (w *SerialWorker) NewCancel(cancel func() error) {
+	w.in = &Stdin{cancel: cancel}
+}
+
+// Копирует пока в контексте SerialWorker.
+// Потом выходит из контекста чтоб прервать встречное копирование.
 func (w *SerialWorker) Copy(dst io.Writer, src io.Reader) (written int64, err error) {
 	written, err = Copy(w.context, dst, src)
 	w.cancel()
 	return
 }
 
+// Копирует пока в контексте SerialWorker с отложенный на delay src.Read.
+// Потом выходит из контекста чтоб прервать встречное копирование.
 func (w *SerialWorker) CopyAfter(dst io.Writer, src io.Reader, delay time.Duration) (written int64, err error) {
 	written, err = CopyAfter(w.context, dst, src, delay)
 	w.cancel()
 	return
 }
 
+// Используется после установки через NewCancel для прерывания копирования.
+func (w *SerialWorker) Cancel() (ok bool) {
+	if w.in != nil {
+		w.in.Cancel()
+	}
+	return
+}
+
+// Заменяет в addr псевдохосты "", * , _.
+// "123"->"127.0.0.1:123".
+// ":123"->"127.0.0.1:123".
+// "*:123"->"firstUpInt:123".
+// "_:123"->"lastUpInt:123".
 func LocalPort(addr string) string {
 	addr = strings.TrimPrefix(addr, ":")
 	if _, err := strconv.ParseUint(addr, 10, 16); err == nil {
@@ -1132,6 +1159,8 @@ func LocalPort(addr string) string {
 	return addr
 }
 
+// Пишет в ips адреса поднятых интерфейсов без лупбэка.
+// Если таких нет тогда лупбэк.
 func Ints() (ips []string) {
 	ifaces, err := net.Interfaces()
 	if err == nil {
