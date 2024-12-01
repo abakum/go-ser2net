@@ -666,10 +666,13 @@ func (w *SerialWorker) New(params map[string][]string, _ map[string][]string) (s
 }
 
 // NewIoReadWriteCloser returns a ReadWriteCloser interface
+const TOopen = 200
+
 func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) {
-	for i := 0; i < 20; i++ {
+	const TOtryOpen = 10
+	for i := 0; i < TOopen/TOtryOpen; i++ {
 		if w.connected {
-			// log.Println(w, "in", i*10, "milliseconds\r")
+			// log.Println(w, "in", i*TOtryOpen, "milliseconds\r")
 			rx := w.Open()
 			s = &SerialIOWorker{
 				w:  w,
@@ -678,9 +681,9 @@ func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) 
 			w.context, w.cancel = context.WithCancel(w.context)
 			return
 		}
-		time.Sleep(time.Millisecond * 10)
+		time.Sleep(time.Millisecond * TOtryOpen)
 	}
-	err = fmt.Errorf("not connected to %s in 200 milliseconds. Last error:%s", w.path, w.lastErr)
+	err = fmt.Errorf("not connected to %s in %d milliseconds. Last error:%s", w.path, TOopen, w.lastErr)
 	return
 }
 
@@ -1068,7 +1071,7 @@ func CopyAfter(ctx context.Context, dst io.Writer, src io.Reader, delay time.Dur
 func (w *SerialWorker) CopyCancel(dst io.Writer, src io.Reader) (written int64, err error) {
 	// written, err = io.Copy(dst, src)
 	written, err = w.Copy(dst, src)
-	log.Printf("CopyCancel done\r\n")
+	// log.Printf("CopyCancel done\r\n")
 	w.Cancel()
 	return
 }
@@ -1100,7 +1103,7 @@ func (w *SerialWorker) CancelCopy(dst io.Writer, src io.ReadCloser) (written int
 	}
 	// written, err = io.Copy(dst, s)
 	written, err = w.Copy(dst, s)
-	log.Printf("CancelCopy done\r\n")
+	// log.Printf("CancelCopy done\r\n")
 	if err != nil && err.Error() == "The handle is invalid." {
 		err = fmt.Errorf("read canceled")
 	}
@@ -1130,8 +1133,9 @@ func (w *SerialWorker) CopyAfter(dst io.Writer, src io.Reader, delay time.Durati
 
 // Используется после установки через NewCancel для прерывания копирования.
 func (w *SerialWorker) Cancel() (ok bool) {
+	w.Stop()
 	if w.in != nil {
-		w.in.Cancel()
+		ok = w.in.Cancel()
 	}
 	return
 }
