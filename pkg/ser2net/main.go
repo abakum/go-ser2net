@@ -731,7 +731,6 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string, qu
 	w.web = srv
 	w.context, w.cancel = context.WithCancel(w.context)
 	w.url = fmt.Sprintf("http://%s", net.JoinHostPort(appOptions.Address, appOptions.Port))
-	log.Println("---------------", w.url, address)
 	err = srv.Run(w.context)
 	// log.Printf("StartGoTTY w.Stop")
 	w.Stop()
