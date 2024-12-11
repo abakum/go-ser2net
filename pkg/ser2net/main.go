@@ -1140,25 +1140,28 @@ func (w *SerialWorker) Cancel() (ok bool) {
 	return
 }
 
-// Заменяет в addr псевдохосты "", * , _.
+// Заменяет в addr локальные алиасы "", *, +, _ для dial.
 // "123"->"127.0.0.1:123".
 // ":123"->"127.0.0.1:123".
 // "*:123"->"firstUpInt:123".
+// "+:123"->"firstUpInt:123".
 // "_:123"->"lastUpInt:123".
 func LocalPort(addr string) string {
 	addr = strings.TrimPrefix(addr, ":")
 	if _, err := strconv.ParseUint(addr, 10, 16); err == nil {
 		return lh + ":" + addr
 	}
-	if strings.HasPrefix(addr, "*:") || strings.HasPrefix(addr, "0.0.0.0:") || strings.HasPrefix(addr, "_:") {
+	if strings.HasPrefix(addr, "_:") ||
+		strings.HasPrefix(addr, "*:") || strings.HasPrefix(addr, "+:") || strings.HasPrefix(addr, "0.0.0.0:") {
 		ips := Ints()
 		if strings.HasPrefix(addr, "_:") {
 			addr = strings.TrimPrefix(addr, "_:")
-			return ips[0] + ":" + addr
+			return ips[len(ips)-1] + ":" + addr
 		}
 		addr = strings.TrimPrefix(addr, "*:")
+		addr = strings.TrimPrefix(addr, "+:")
 		addr = strings.TrimPrefix(addr, "0.0.0.0:")
-		return ips[len(ips)-1] + ":" + addr
+		return ips[0] + ":" + addr
 	}
 	return addr
 }
