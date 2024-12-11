@@ -698,7 +698,7 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string, qu
 		return
 	}
 	appOptions.PermitWrite = true
-	appOptions.Address = LocalPort(address)
+	appOptions.Address = address
 	appOptions.EnableReconnect = true
 	appOptions.Port = fmt.Sprintf("%d", port)
 	appOptions.EnableBasicAuth = len(basicauth) > 0
