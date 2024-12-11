@@ -698,7 +698,7 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string, qu
 		return
 	}
 	appOptions.PermitWrite = true
-	appOptions.Address = address
+	appOptions.Address = LocalPort(address)
 	appOptions.EnableReconnect = true
 	appOptions.Port = fmt.Sprintf("%d", port)
 	appOptions.EnableBasicAuth = len(basicauth) > 0
@@ -731,6 +731,7 @@ func (w *SerialWorker) StartGoTTY(address string, port int, basicauth string, qu
 	w.web = srv
 	w.context, w.cancel = context.WithCancel(w.context)
 	w.url = fmt.Sprintf("http://%s", net.JoinHostPort(appOptions.Address, appOptions.Port))
+	log.Println("---------------", w.url, address)
 	err = srv.Run(w.context)
 	// log.Printf("StartGoTTY w.Stop")
 	w.Stop()
@@ -1141,28 +1142,58 @@ func (w *SerialWorker) Cancel() (ok bool) {
 }
 
 // Заменяет в addr локальные алиасы "", *, +, _ для dial.
+// "host:123"->"host:123"
+// "host"->"host"
 // "123"->"127.0.0.1:123".
 // ":123"->"127.0.0.1:123".
 // "*:123"->"firstUpInt:123".
 // "+:123"->"firstUpInt:123".
+// "0.0.0.0:123"->"firstUpInt:123".
 // "_:123"->"lastUpInt:123".
+// "*"->"firstUpInt".
+// "+"->"firstUpInt".
+// "0.0.0.0"->"firstUpInt".
+// "_"->"lastUpInt".
 func LocalPort(addr string) string {
-	addr = strings.TrimPrefix(addr, ":")
-	if _, err := strconv.ParseUint(addr, 10, 16); err == nil {
-		return lh + ":" + addr
+	// ":123"->"127.0.0.1:123".
+	s := strings.TrimPrefix(addr, ":")
+	// "123"->"127.0.0.1:123".
+	if _, err := strconv.ParseUint(s, 10, 16); err == nil {
+		return lh + ":" + s
 	}
-	if strings.HasPrefix(addr, "_:") ||
-		strings.HasPrefix(addr, "*:") || strings.HasPrefix(addr, "+:") || strings.HasPrefix(addr, "0.0.0.0:") {
-		ips := Ints()
-		if strings.HasPrefix(addr, "_:") {
-			addr = strings.TrimPrefix(addr, "_:")
-			return ips[len(ips)-1] + ":" + addr
+	for k, v := range []string{"_", "*", "+", "0.0.0.0"} {
+		if v == s || strings.HasPrefix(s, v+":") {
+			if v == s {
+				// "_"->"lastUpInt".
+				// "*"->"firstUpInt".
+				// "+"->"firstUpInt".
+				// "0.0.0.0"->"firstUpInt".
+				s = ""
+			} else {
+				// "_:123"->"lastUpInt:123".
+				// "*:123"->"firstUpInt:123".
+				// "+:123"->"firstUpInt:123".
+				// "0.0.0.0:123"->"firstUpInt:123".
+				s = strings.TrimPrefix(s, v)
+				// s="":123"
+			}
+			ips := Ints()
+			if k == 0 {
+				// "_"->"lastUpInt".
+				// "_:123"->"lastUpInt:123".
+				return ips[len(ips)-1] + s
+			}
+			// "*:123"->"firstUpInt:123".
+			// "+:123"->"firstUpInt:123".
+			// "0.0.0.0:123"->"firstUpInt:123".
+			// "*"->"firstUpInt".
+			// "+"->"firstUpInt".
+			// "0.0.0.0"->"firstUpInt".
+			return ips[0] + s
 		}
-		addr = strings.TrimPrefix(addr, "*:")
-		addr = strings.TrimPrefix(addr, "+:")
-		addr = strings.TrimPrefix(addr, "0.0.0.0:")
-		return ips[0] + ":" + addr
 	}
+	// "host:123"->"host:123"
+	// "host"->"host"
 	return addr
 }
 
