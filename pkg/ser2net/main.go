@@ -1079,22 +1079,25 @@ func (w *SerialWorker) CopyCancel(dst io.Writer, src io.Reader) (written int64, 
 type ReadWriteCloser struct {
 	io.Reader
 	io.WriteCloser
+	Cygwin bool
 }
 
 func (w *SerialWorker) CancelCopy(dst io.Writer, src io.ReadCloser) (written int64, err error) {
 	s := src
 	_, like := w.serialConn.(*likeSerialPort)
-	_, local := src.(ReadWriteCloser)
+	c, local := src.(ReadWriteCloser)
 	if like {
 		if local {
-			w.in, err = NewStdin()
-			if err == nil {
-				s = w.in
-				// log.Printf("LikeSerial & Local %+v\r\n", w.in)
-				defer func() {
-					w.in.Close()
-					w.in = nil
-				}()
+			if !c.Cygwin {
+				w.in, err = NewStdin()
+				if err == nil {
+					s = w.in
+					// log.Printf("LikeSerial & Local %+v\r\n", w.in)
+					defer func() {
+						w.in.Close()
+						w.in = nil
+					}()
+				}
 			}
 		} else {
 			w.in = &Stdin{cancel: src.Close}
@@ -1104,7 +1107,7 @@ func (w *SerialWorker) CancelCopy(dst io.Writer, src io.ReadCloser) (written int
 	// written, err = io.Copy(dst, s)
 	written, err = w.Copy(dst, s)
 	// log.Printf("CancelCopy done\r\n")
-	if err != nil && err.Error() == "The handle is invalid." {
+	if w.in != nil && err != nil && err.Error() == "The handle is invalid." {
 		err = fmt.Errorf("read canceled")
 	}
 	return

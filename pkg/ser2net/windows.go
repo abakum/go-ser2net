@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	term "github.com/abakum/term/windows"
+	"github.com/mattn/go-isatty"
 	"golang.org/x/sys/windows"
 )
 
@@ -46,6 +47,9 @@ type Stdin struct {
 
 // Конструктор Stdin
 func NewStdin() (*Stdin, error) {
+	if isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+		return nil, fmt.Errorf("cygwin")
+	}
 	rc, err := term.NewAnsiReaderDuplicate(os.Stdin)
 	return &Stdin{
 		ReadCloser: rc,
