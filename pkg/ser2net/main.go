@@ -1122,7 +1122,9 @@ func (w *SerialWorker) NewCancel(cancel func() error) {
 // Потом выходит из контекста чтоб прервать встречное копирование.
 func (w *SerialWorker) Copy(dst io.Writer, src io.Reader) (written int64, err error) {
 	written, err = Copy(w.context, dst, src)
-	w.cancel()
+	if w.cancel != nil {
+		w.cancel()
+	}
 	return
 }
 
@@ -1130,7 +1132,9 @@ func (w *SerialWorker) Copy(dst io.Writer, src io.Reader) (written int64, err er
 // Потом выходит из контекста чтоб прервать встречное копирование.
 func (w *SerialWorker) CopyAfter(dst io.Writer, src io.Reader, delay time.Duration) (written int64, err error) {
 	written, err = CopyAfter(w.context, dst, src, delay)
-	w.cancel()
+	if w.cancel != nil {
+		w.cancel()
+	}
 	return
 }
 
