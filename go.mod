@@ -5,10 +5,12 @@ go 1.21
 // replace github.com/sorenisanerd/gotty => ../gotty
 // replace github.com/abakum/go-console => ../go-console
 // replace github.com/abakum/go-terminal-size => ../go-terminal-size
+replace go.bug.st/serial => ../go-serial
 
 require (
 	github.com/PatrickRudolph/telnet v0.0.0-20210301083732-6a03c1f7971f
 	github.com/abakum/cancelreader v0.0.0-20241122215017-9e298cf19164
+	github.com/abakum/go-serial v1.6.2
 	github.com/abakum/go-terminal-size v0.0.0-20241120142632-2e3252fa87fa
 	github.com/abakum/term v0.0.1
 	github.com/containerd/console v1.0.4
@@ -16,8 +18,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/sorenisanerd/gotty v1.5.1-0.20240325190845-c69d11d17d83
 	github.com/xlab/closer v1.1.0
-	go.bug.st/serial v1.6.2
-	golang.org/x/sys v0.27.0
+	golang.org/x/sys v0.29.0
 )
 
 require (
@@ -41,8 +42,6 @@ require (
 
 require (
 	github.com/abakum/go-console v0.0.1
-	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
-	github.com/stretchr/testify v1.7.1 // indirect
 	github.com/urfave/cli/v2 v2.24.2 // indirect
 )

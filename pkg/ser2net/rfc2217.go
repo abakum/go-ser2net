@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/PatrickRudolph/telnet"
-	"go.bug.st/serial"
+	"github.com/abakum/go-serial"
 )
 
 const (
@@ -55,7 +55,7 @@ func (w *SerialWorker) Client2217(c *telnet.Connection) telnet.Negotiator {
 
 	if w.rfc2217 != nil {
 		// Для клиента RFC2217 на сервере свой экземпляр SerialWorker.
-		w, _ = NewSerialWorker(w.context, c.LocalAddr().String(), -1)
+		w, _ = NewSerialWorker(w.context, c.LocalAddr().String(), CLIENTonSERVER)
 	} else {
 		// Чтоб запросить режим.
 		w.mode = serial.Mode{}

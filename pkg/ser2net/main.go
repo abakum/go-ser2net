@@ -19,17 +19,19 @@ import (
 	"github.com/PatrickRudolph/telnet"
 	"github.com/PatrickRudolph/telnet/options"
 	"github.com/abakum/go-console"
+	"github.com/abakum/go-serial"
 	"github.com/sorenisanerd/gotty/server"
 	"github.com/sorenisanerd/gotty/utils"
-	"go.bug.st/serial"
 )
 
 const (
-	b16 = 16
-	k1  = 1024
-	k4  = 4 * k1
-	k32 = 32 * k1
-	lh  = "127.0.0.1"
+	b16            = 16
+	k1             = 1024
+	k4             = 4 * k1
+	k32            = 32 * k1
+	lh             = "127.0.0.1"
+	CLIENTonSERVER = -2
+	OLDBAUD        = -1
 )
 
 // SerialWorker instances one serial-network bridge
@@ -813,7 +815,7 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 		// Последовательный порт
 		w.lastErr = fmt.Sprintf("Serial %s is not connected", w.path)
 	}
-	if baud < 0 {
+	if baud == CLIENTonSERVER {
 		// Для клиента на сервере
 		w.mode = serial.Mode{}
 		return &w, nil
@@ -829,9 +831,7 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 	// }
 
 	w.mode = DefaultMode
-	if baud > 0 {
-		w.mode.BaudRate = baud
-	}
+	w.mode.BaudRate = baud
 
 	return &w, nil
 }
@@ -839,7 +839,7 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 // baudRate(strconv.Atoi("x"))
 func BaudRate(b int, err error) (baud int) {
 	if err != nil {
-		baud = 9600
+		baud = OLDBAUD
 		return
 	}
 	switch b {
