@@ -5,7 +5,7 @@ go 1.21
 // replace github.com/sorenisanerd/gotty => ../gotty
 // replace github.com/abakum/go-console => ../go-console
 // replace github.com/abakum/go-terminal-size => ../go-terminal-size
-replace go.bug.st/serial => ../go-serial
+// replace github.com/abakum/go-serial => ../go-serial
 
 require (
 	github.com/PatrickRudolph/telnet v0.0.0-20210301083732-6a03c1f7971f
