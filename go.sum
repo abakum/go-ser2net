@@ -14,6 +14,8 @@ github.com/abakum/go-serial v0.0.0-20250203123811-9b9d2e07ed7f h1:STRiCJ1pHoHx13
 github.com/abakum/go-serial v0.0.0-20250203123811-9b9d2e07ed7f/go.mod h1:ElCv1OKGi+S2GHOSNVLfBGQJ/ZNDef9iBSomXnB39Go=
 github.com/abakum/go-serial v1.6.2 h1:xxj8EFe8LNYdhrsAUl5BOu9P1dPT81hBGpzI4Z95hoM=
 github.com/abakum/go-serial v1.6.2/go.mod h1:XM5njfUqEff8+x098gQUEjvzz/RtJtUj6KoAwSpoEc0=
+github.com/abakum/go-serial v1.6.3-0.20250204073413-427ed9ffe5b8 h1:5NjNrEtHtJS+XM42+DdjgbvIoxEN0xljlogi6C7aMhQ=
+github.com/abakum/go-serial v1.6.3-0.20250204073413-427ed9ffe5b8/go.mod h1:XM5njfUqEff8+x098gQUEjvzz/RtJtUj6KoAwSpoEc0=
 github.com/abakum/go-terminal-size v0.0.0-20241120142632-2e3252fa87fa h1:i4hZfxHcUwpuepDRXWSaTTXwbSUemJGgVxnggUXXDmc=
 github.com/abakum/go-terminal-size v0.0.0-20241120142632-2e3252fa87fa/go.mod h1:pXwxWIukuSCoRfQTfc+DUtibVYfh8nd1Ed0wy8uOW/A=
 github.com/abakum/term v0.0.1 h1:Hzorh9SHzWuB24UG9iPm72MfHSnVy37Z4P08ifVKzeY=

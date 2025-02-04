@@ -10,7 +10,7 @@ go 1.21
 require (
 	github.com/PatrickRudolph/telnet v0.0.0-20210301083732-6a03c1f7971f
 	github.com/abakum/cancelreader v0.0.0-20241122215017-9e298cf19164
-	github.com/abakum/go-serial v1.6.2
+	github.com/abakum/go-serial v1.6.3-0.20250204073413-427ed9ffe5b8
 	github.com/abakum/go-terminal-size v0.0.0-20241120142632-2e3252fa87fa
 	github.com/abakum/term v0.0.1
 	github.com/containerd/console v1.0.4
