@@ -10,12 +10,8 @@ github.com/abakum/go-ansiterm v0.0.1 h1:HOuYlcBv60O78WZ+j4hhgmirsyQKJomybMaVycQZ
 github.com/abakum/go-ansiterm v0.0.1/go.mod h1:WzQf6EqfkRdEyEveQ6edF8KNbe3UW1jVDBmV2uVkNLs=
 github.com/abakum/go-console v0.0.1 h1:AMnxwQnzg4j5J8gliXdvdaFzNPC4km/N2pXt0kQfgf4=
 github.com/abakum/go-console v0.0.1/go.mod h1:WXaFNcb4jHcrjFo8/A/Vbd6Zevu/B2LiOf5NPCMuF5w=
-github.com/abakum/go-serial v0.0.0-20250203123811-9b9d2e07ed7f h1:STRiCJ1pHoHx13HQY083yz4MIgNLssSj7ycuTgL9g+4=
-github.com/abakum/go-serial v0.0.0-20250203123811-9b9d2e07ed7f/go.mod h1:ElCv1OKGi+S2GHOSNVLfBGQJ/ZNDef9iBSomXnB39Go=
-github.com/abakum/go-serial v1.6.2 h1:xxj8EFe8LNYdhrsAUl5BOu9P1dPT81hBGpzI4Z95hoM=
-github.com/abakum/go-serial v1.6.2/go.mod h1:XM5njfUqEff8+x098gQUEjvzz/RtJtUj6KoAwSpoEc0=
-github.com/abakum/go-serial v1.6.3-0.20250204073413-427ed9ffe5b8 h1:5NjNrEtHtJS+XM42+DdjgbvIoxEN0xljlogi6C7aMhQ=
-github.com/abakum/go-serial v1.6.3-0.20250204073413-427ed9ffe5b8/go.mod h1:XM5njfUqEff8+x098gQUEjvzz/RtJtUj6KoAwSpoEc0=
+github.com/abakum/go-serial v1.6.3-0.20250207114954-a79b4ab30905 h1:l9wJODphjKaybpL97fdyC5iy0gc01xuO1HxXg2tU+1g=
+github.com/abakum/go-serial v1.6.3-0.20250207114954-a79b4ab30905/go.mod h1:WRtWufKwGnFFwnxCDPwgXRx6VOaHn5bV1Z4grCta698=
 github.com/abakum/go-terminal-size v0.0.0-20241120142632-2e3252fa87fa h1:i4hZfxHcUwpuepDRXWSaTTXwbSUemJGgVxnggUXXDmc=
 github.com/abakum/go-terminal-size v0.0.0-20241120142632-2e3252fa87fa/go.mod h1:pXwxWIukuSCoRfQTfc+DUtibVYfh8nd1Ed0wy8uOW/A=
 github.com/abakum/term v0.0.1 h1:Hzorh9SHzWuB24UG9iPm72MfHSnVy37Z4P08ifVKzeY=
@@ -33,6 +29,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/fatih/structs v1.1.0 h1:Q7juDM0QtcnhCpeyLGQKyg4TOIghuNXrkL32pHAUMxo=
 github.com/fatih/structs v1.1.0/go.mod h1:9NiDSp5zOcgEDl+j00MP/WkGVPOlPRLejGD8Ga6PJ7M=
+github.com/fvbommel/sortorder v1.1.0 h1:fUmoe+HLsBTctBDoaBwpQo5N+nrCp8g/BjKb/6ZQmYw=
+github.com/fvbommel/sortorder v1.1.0/go.mod h1:uk88iVf1ovNn1iLfgUVU2F9o5eO30ui720w+kxuqRs0=
 github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 h1:El6M4kTTCOh6aBiKaUGG7oYTSPP8MxqL4YI3kZKwcP4=
 github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510/go.mod h1:pupxD2MaaD3pAXIBCelhxNneeOaAeabZDe5s4K6zSpQ=
 github.com/gorilla/websocket v1.5.0 h1:PPwGk2jz7EePpoHN/+ClbZu8SPxiqlu12wZP/3sWmnc=

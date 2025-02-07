@@ -31,7 +31,7 @@ func main() {
 	telnet := false
 	gotty := false
 	stdin := true
-	baud := 115200
+	baud := -1
 	once := false
 
 	flag.StringVar(&bindHostname, "bind", bindHostname, "Hostname or IP to bind telnet to")

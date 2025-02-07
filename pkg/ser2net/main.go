@@ -415,23 +415,30 @@ func (w *SerialWorker) Worker() {
 		// Transmit to telnet
 		go w.rxWorker()
 
-		var err error
-		if w.like == nil || w.like.command {
-			_, err = os.Stat(w.path)
+		pathExists := func() (ok bool) {
+			if w.like == nil || len(w.args) > 0 {
+				path := w.path
+				if len(w.args) == 0 {
+					// serial
+					path = serial.DevName(w.path)
+				}
+				if _, err := os.Stat(path); err == nil || runtime.GOOS == "windows" && strings.HasSuffix(err.Error(), "Access is denied.") {
+					return true
+				}
+				return
+			}
+			return true
 		}
 
 	loop:
 		// Windows after open serial port block access to it
 		// do not w.serialConn.Close if err == nil || runtime.GOOS == "windows" && strings.HasSuffix(err.Error(), "Access is denied.")
-		for w.connected && (err == nil || runtime.GOOS == "windows" && strings.HasSuffix(err.Error(), "Access is denied.")) {
+		for w.connected && pathExists() {
 			select {
 			case <-w.context.Done():
 				w.quitting = true
 				break loop
 			case <-time.After(time.Second):
-				if w.like == nil || w.like.command {
-					_, err = os.Stat(w.path)
-				}
 			}
 		}
 		// log.Printf("Worker w.SerialClose")
@@ -668,7 +675,7 @@ func (w *SerialWorker) New(params map[string][]string, _ map[string][]string) (s
 }
 
 // NewIoReadWriteCloser returns a ReadWriteCloser interface
-const TOopen = 200
+const TOopen = 300
 
 func (w *SerialWorker) NewIoReadWriteCloser() (s io.ReadWriteCloser, err error) {
 	const TOtryOpen = 10
@@ -807,13 +814,14 @@ func NewSerialWorker(context context.Context, path string, baud int) (*SerialWor
 		w.path = args[0]
 		w.args = args
 		w.lastErr = fmt.Sprintf("Command %v not started", args)
+	} else if SerialPath(path) {
+		// Последовательный порт
+		w.path = serial.PortName(path)
+		w.lastErr = fmt.Sprintf("Serial %s is not connected", w.path)
 	} else if _, _, err := net.SplitHostPort(LocalPort(path)); err == nil {
 		// Клиент telnet
 		w.path = LocalPort(path)
 		w.lastErr = fmt.Sprintf("Serial or command over telnet://%s is not connected", w.path)
-	} else if SerialPath(path) {
-		// Последовательный порт
-		w.lastErr = fmt.Sprintf("Serial %s is not connected", w.path)
 	}
 	if baud == CLIENTonSERVER {
 		// Для клиента на сервере
@@ -1007,6 +1015,9 @@ func IsCommand(path string) (args []string, ok bool) {
 
 // Похож ли path на последовательную консоль
 func SerialPath(path string) bool {
+	if _, err := strconv.Atoi(path); err == nil {
+		return true
+	}
 	if _, _, err := net.SplitHostPort(path); err == nil || strings.Contains(path, " ") {
 		// if strings.Contains(path, " ") || strings.Contains(path, ":") {
 		return false

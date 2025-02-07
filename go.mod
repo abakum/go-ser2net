@@ -10,7 +10,7 @@ go 1.21
 require (
 	github.com/PatrickRudolph/telnet v0.0.0-20210301083732-6a03c1f7971f
 	github.com/abakum/cancelreader v0.0.0-20241122215017-9e298cf19164
-	github.com/abakum/go-serial v1.6.3-0.20250204073413-427ed9ffe5b8
+	github.com/abakum/go-serial v1.6.3-0.20250207114954-a79b4ab30905
 	github.com/abakum/go-terminal-size v0.0.0-20241120142632-2e3252fa87fa
 	github.com/abakum/term v0.0.1
 	github.com/containerd/console v1.0.4
@@ -29,6 +29,7 @@ require (
 	github.com/creack/goselect v0.1.2 // indirect
 	github.com/creack/pty v1.1.21 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
+	github.com/fvbommel/sortorder v1.1.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/iamacarpet/go-winpty v1.0.4 // indirect
