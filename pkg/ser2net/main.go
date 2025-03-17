@@ -1177,7 +1177,7 @@ func LocalPort(addr string) string {
 	if _, err := strconv.ParseUint(s, 10, 16); err == nil {
 		return lh + ":" + s
 	}
-	for k, v := range []string{"_", "+", "0.0.0.0"} {
+	for _, v := range []string{"_", "+", "0.0.0.0"} {
 		if v == s || strings.HasPrefix(s, v+":") {
 			if v == s {
 				// "_"->"lastUpInt".
