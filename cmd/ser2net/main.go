@@ -22,6 +22,17 @@ import (
 func main() {
 	log.SetFlags(log.Llongfile | log.Lmicroseconds)
 	log.SetPrefix("\r")
+	// log.Println(ser2net.LocalPort("host:123") == "host:123")
+	// log.Println(ser2net.LocalPort("host") == "host")
+	// lh := "127.0.0.1"
+	// log.Println(ser2net.LocalPort("123") == lh+":123")
+	// log.Println(ser2net.LocalPort(":123") == lh+":123")
+	// firstUpInt := "192.168.0.2"
+	// log.Println(ser2net.LocalPort("+:123") == firstUpInt+":123")
+	// log.Println(ser2net.LocalPort("0.0.0.0:123") == firstUpInt+":123")
+	// log.Println(ser2net.LocalPort("_:123") == firstUpInt+":123")
+	// log.Println(ser2net.LocalPort("+") == firstUpInt)
+	// log.Println(ser2net.LocalPort("0.0.0.0") == firstUpInt)
 	port := 2323
 	devPath := `COM3`
 	// devPath := `cmd`
@@ -49,9 +60,9 @@ func main() {
 		panic("Error: Device path not set and config not given")
 	}
 	switch bindHostname {
-	case "*":
-		bindHostname = "0.0.0.0"
 	case "":
+		bindHostname = "0.0.0.0"
+	case "+":
 		bindHostname = "127.0.0.1"
 	}
 

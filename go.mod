@@ -10,6 +10,7 @@ go 1.21
 require (
 	github.com/PatrickRudolph/telnet v0.0.0-20210301083732-6a03c1f7971f
 	github.com/abakum/cancelreader v0.0.0-20241122215017-9e298cf19164
+	github.com/abakum/go-netroute v0.0.0-20250317083818-2d043769dafc
 	github.com/abakum/go-serial v1.6.3-0.20250207114954-a79b4ab30905
 	github.com/abakum/go-terminal-size v0.0.0-20241120142632-2e3252fa87fa
 	github.com/abakum/term v0.0.1
@@ -30,6 +31,7 @@ require (
 	github.com/creack/pty v1.1.21 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/fvbommel/sortorder v1.1.0 // indirect
+	github.com/google/gopacket v1.1.19 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/iamacarpet/go-winpty v1.0.4 // indirect
@@ -37,8 +39,9 @@ require (
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	github.com/yudai/hcl v0.0.0-20151013225006-5fa2393b3552 // indirect
-	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519 // indirect
-	golang.org/x/term v0.5.0 // indirect
+	golang.org/x/crypto v0.28.0 // indirect
+	golang.org/x/net v0.30.0 // indirect
+	golang.org/x/term v0.25.0 // indirect
 )
 
 require (

@@ -19,6 +19,7 @@ import (
 	"github.com/PatrickRudolph/telnet"
 	"github.com/PatrickRudolph/telnet/options"
 	"github.com/abakum/go-console"
+	"github.com/abakum/go-netroute"
 	"github.com/abakum/go-serial"
 	"github.com/sorenisanerd/gotty/server"
 	"github.com/sorenisanerd/gotty/utils"
@@ -1163,11 +1164,9 @@ func (w *SerialWorker) Cancel() (ok bool) {
 // "host"->"host"
 // "123"->"127.0.0.1:123".
 // ":123"->"127.0.0.1:123".
-// "*:123"->"firstUpInt:123".
 // "+:123"->"firstUpInt:123".
 // "0.0.0.0:123"->"firstUpInt:123".
 // "_:123"->"lastUpInt:123".
-// "*"->"firstUpInt".
 // "+"->"firstUpInt".
 // "0.0.0.0"->"firstUpInt".
 // "_"->"lastUpInt".
@@ -1178,34 +1177,21 @@ func LocalPort(addr string) string {
 	if _, err := strconv.ParseUint(s, 10, 16); err == nil {
 		return lh + ":" + s
 	}
-	for k, v := range []string{"_", "*", "+", "0.0.0.0"} {
+	for k, v := range []string{"_", "+", "0.0.0.0"} {
 		if v == s || strings.HasPrefix(s, v+":") {
 			if v == s {
 				// "_"->"lastUpInt".
-				// "*"->"firstUpInt".
 				// "+"->"firstUpInt".
 				// "0.0.0.0"->"firstUpInt".
 				s = ""
 			} else {
 				// "_:123"->"lastUpInt:123".
-				// "*:123"->"firstUpInt:123".
 				// "+:123"->"firstUpInt:123".
 				// "0.0.0.0:123"->"firstUpInt:123".
 				s = strings.TrimPrefix(s, v)
 				// s="":123"
 			}
 			ips := Ints()
-			if k == 0 {
-				// "_"->"lastUpInt".
-				// "_:123"->"lastUpInt:123".
-				return ips[len(ips)-1] + s
-			}
-			// "*:123"->"firstUpInt:123".
-			// "+:123"->"firstUpInt:123".
-			// "0.0.0.0:123"->"firstUpInt:123".
-			// "*"->"firstUpInt".
-			// "+"->"firstUpInt".
-			// "0.0.0.0"->"firstUpInt".
 			return ips[0] + s
 		}
 	}
@@ -1216,6 +1202,7 @@ func LocalPort(addr string) string {
 
 // Пишет в ips адреса поднятых интерфейсов без лупбэка.
 // Если таких нет тогда лупбэк.
+// Первый адрес это LAN роутера.
 func Ints() (ips []string) {
 	ifaces, err := net.Interfaces()
 	if err == nil {
@@ -1234,6 +1221,26 @@ func Ints() (ips []string) {
 	}
 	if len(ips) == 0 {
 		ips = append(ips, lh)
+	}
+	if len(ips) > 1 {
+		first := ips[0]
+		router := first
+		r, err := netroute.New()
+		if err == nil {
+			_, _, src, err := r.Route(net.IPv4(0, 0, 0, 0))
+			if err == nil {
+				router = src.String()
+			}
+		}
+		if first != router {
+			old := ips[:]
+			ips = []string{router}
+			for _, ip := range old {
+				if ip != router {
+					ips = append(ips, ip)
+				}
+			}
+		}
 	}
 	return
 }
