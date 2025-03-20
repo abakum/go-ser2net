@@ -22,17 +22,53 @@ import (
 func main() {
 	log.SetFlags(log.Llongfile | log.Lmicroseconds)
 	log.SetPrefix("\r")
-	// log.Println(ser2net.LocalPort("host:123") == "host:123")
-	// log.Println(ser2net.LocalPort("host") == "host")
-	// lh := "127.0.0.1"
-	// log.Println(ser2net.LocalPort("123") == lh+":123")
-	// log.Println(ser2net.LocalPort(":123") == lh+":123")
-	// firstUpInt := "192.168.0.2"
-	// log.Println(ser2net.LocalPort("+:123") == firstUpInt+":123")
-	// log.Println(ser2net.LocalPort("0.0.0.0:123") == firstUpInt+":123")
-	// log.Println(ser2net.LocalPort("_:123") == firstUpInt+":123")
-	// log.Println(ser2net.LocalPort("+") == firstUpInt)
-	// log.Println(ser2net.LocalPort("0.0.0.0") == firstUpInt)
+	lh := "127.0.0.1"
+	firstUpInt := "192.168.0.2"
+
+	// ""->"".
+	log.Println(ser2net.LocalPort_("") == "")
+	log.Println(ser2net.LocalPort("") == "")
+
+	// +->127.0.0.1.
+	log.Println(ser2net.LocalPort_("+") == firstUpInt)
+	log.Println(ser2net.LocalPort("+") == lh)
+
+	// :->127.0.0.1:.
+	log.Println(ser2net.LocalPort_(":") == ":")
+	log.Println(ser2net.LocalPort(":") == lh+":")
+
+	// +:->127.0.0.1:.
+	log.Println(ser2net.LocalPort_("+:") == firstUpInt+":")
+	log.Println(ser2net.LocalPort("+:") == lh+":")
+
+	// +:123->127.0.0.1:123.
+	log.Println(ser2net.LocalPort_("+:123") == firstUpInt+":123")
+	log.Println(ser2net.LocalPort("+:123") == lh+":123")
+
+	// 123->firstUpInt:123.
+	log.Println(ser2net.LocalPort_("123") == lh+":123")
+	log.Println(ser2net.LocalPort("123") == lh+":123")
+
+	// _->firstUpInt.
+	log.Println(ser2net.LocalPort_("_") == firstUpInt)
+	log.Println(ser2net.LocalPort("_") == firstUpInt)
+
+	// _:->firstUpInt:.
+	log.Println(ser2net.LocalPort_("_:") == firstUpInt+":")
+	log.Println(ser2net.LocalPort("_:") == firstUpInt+":")
+
+	// _:123->firstUpInt:123.
+	log.Println(ser2net.LocalPort_("_:123") == firstUpInt+":123")
+	log.Println(ser2net.LocalPort("_:123") == firstUpInt+":123")
+
+	// "host:123"->"host:123"
+	log.Println(ser2net.LocalPort_("host:123") == "host:123")
+	log.Println(ser2net.LocalPort("host:123") == "host:123")
+
+	// "host"->"host"
+	log.Println(ser2net.LocalPort_("host") == "host")
+	log.Println(ser2net.LocalPort("host") == "host")
+
 	port := 2323
 	devPath := `COM3`
 	// devPath := `cmd`

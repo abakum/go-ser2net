@@ -1007,7 +1007,7 @@ func isFileExist(path string) bool {
 // Похож ли path на команду
 func IsCommand(path string) (args []string, ok bool) {
 	args, err := splitCommandLine(path)
-	if err == nil {
+	if err == nil && len(args) > 0 {
 		args[0], err = exec.LookPath(args[0])
 		ok = err == nil && isFileExist(args[0]) && !SerialPath(path)
 	}
@@ -1016,11 +1016,20 @@ func IsCommand(path string) (args []string, ok bool) {
 
 // Похож ли path на последовательную консоль
 func SerialPath(path string) bool {
-	if _, err := strconv.Atoi(path); err == nil {
-		return true
+	if path == "" || strings.Contains(path, " ") || strings.Count(path, ".") > 1 {
+		return false
 	}
-	if _, _, err := net.SplitHostPort(path); err == nil || strings.Contains(path, " ") {
-		// if strings.Contains(path, " ") || strings.Contains(path, ":") {
+
+	if _, err := strconv.Atoi(path); err == nil {
+		// 1
+		//5000
+		_, err := strconv.ParseUint(path, 10, 8)
+		return err == nil
+		// true
+		// false
+	}
+
+	if _, _, err := net.SplitHostPort(path); err == nil {
 		return false
 	}
 	return LastDigit(path)
@@ -1170,7 +1179,7 @@ func (w *SerialWorker) Cancel() (ok bool) {
 // "+"->"firstUpInt".
 // "0.0.0.0"->"firstUpInt".
 // "_"->"lastUpInt".
-func LocalPort(addr string) string {
+func LocalPort_(addr string) string {
 	// ":123"->"127.0.0.1:123".
 	s := strings.TrimPrefix(addr, ":")
 	// "123"->"127.0.0.1:123".
@@ -1194,6 +1203,57 @@ func LocalPort(addr string) string {
 			ips := Ints()
 			return ips[0] + s
 		}
+	}
+	// "host:123"->"host:123"
+	// "host"->"host"
+	return addr
+}
+
+// Заменяет в addr локальные алиасы "", *, +, _ для dial.
+// ""->"".
+// .->127.0.0.1.
+// :->127.0.0.1:.
+// .:->127.0.0.1:.
+// .:123->127.0.0.1:123.
+// 123->127.0.0.1:123.
+// _->firstUpInt.
+// _:->firstUpInt:.
+// _:123->firstUpInt:123.
+// "host:123"->"host:123"
+// "host"->"host"
+func LocalPort(addr string) string {
+	if addr == "" {
+		// ""->"".
+		return addr
+	}
+	for _, v := range []string{"", "0.0.0.0", "+"} {
+		if v == addr {
+			return lh
+			// +->127.0.0.1.
+		}
+		if strings.HasPrefix(addr, v+":") {
+			p := strings.TrimPrefix(addr, v+":")
+			return lh + ":" + p
+			// :->127.0.0.1:.
+			// +:->127.0.0.1:.
+			// +:123->127.0.0.1:123.
+		}
+	}
+	ips := Ints()
+	if _, err := strconv.ParseUint(addr, 10, 16); err == nil {
+		return lh + ":" + addr
+		// 123->127.0.0.1:123.
+	}
+	v := "_"
+	if v == addr {
+		return ips[0]
+		// _->firstUpInt.
+	}
+	if strings.HasPrefix(addr, v+":") {
+		p := strings.TrimPrefix(addr, v+":")
+		return ips[0] + ":" + p
+		// _:->firstUpInt:.
+		// _:123->firstUpInt:123.
 	}
 	// "host:123"->"host:123"
 	// "host"->"host"
