@@ -217,33 +217,25 @@ func (w *SerialWorker) SetMode(mode *serial.Mode) (err error) {
 	w.mode = *mode
 	// Рассылает всем изменения mode.
 	for _, cl := range w.cls {
-		set := false
 		if cl.remote.BaudRate != mode.BaudRate {
 			if w.baudRate(cl.c) == nil {
 				cl.remote.BaudRate = mode.BaudRate
-				set = true
 			}
 		}
 		if cl.remote.DataBits != mode.DataBits {
 			if w.dataBits(cl.c) == nil {
 				cl.remote.DataBits = mode.DataBits
-				set = true
 			}
 		}
 		if cl.remote.Parity != mode.Parity {
 			if w.parity(cl.c) == nil {
 				cl.remote.Parity = mode.Parity
-				set = true
 			}
 		}
 		if cl.remote.StopBits != mode.StopBits {
 			if w.stopBits(cl.c) == nil {
 				cl.remote.StopBits = mode.StopBits
-				set = true
 			}
-		}
-		if set {
-			cl.c.SetWindowTitle(w.String())
 		}
 	}
 	return

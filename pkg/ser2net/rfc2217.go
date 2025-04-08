@@ -41,7 +41,7 @@ type Client struct {
 // Server2217 enables Com Port negotiation on a Server.
 func (w *SerialWorker) Server2217(c *telnet.Connection) telnet.Negotiator {
 	// log.Printf("%s server %s accepted connection from %s. Mode: %v\r\n", cmdOpt(w.OptionCode()), c.LocalAddr(), c.RemoteAddr(), w.mode)
-	c.SetWindowTitle(w.String())
+	// c.SetWindowTitle(w.String())
 	if w.like != nil && w.like.conn != nil {
 		w.get(w.like.conn) // Добавляем родителя в список
 	}

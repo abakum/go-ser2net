@@ -26,7 +26,7 @@ func (w *SerialWorker) Server1073(c *telnet.Connection) telnet.Negotiator {
 	path = "$" + w.path // $ Чтоб отличить команду от последовтельной консоли
 	// W, H, _ := w.like.console.GetSize()
 	// log.Printf("%s server %s accepted connection from %s. WxH: %dx%d\r\n", cmdOpt(w.like.OptionCode()), c.LocalAddr(), c.RemoteAddr(), W, H)
-	c.SetWindowTitle(w.String())
+	// c.SetWindowTitle(w.String())
 	return w.like
 }
 
